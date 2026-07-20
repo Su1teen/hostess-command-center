@@ -399,7 +399,7 @@ function MapScreen() {
 
 function renderChairs(t: TableDef, color: string) {
   if (t.shape === "bar") return null;
-  const chairs: JSX.Element[] = [];
+  const chairs: React.ReactElement[] = [];
   const cx = t.x + t.w / 2;
   const cy = t.y + t.h / 2;
   if (t.shape === "round") {
