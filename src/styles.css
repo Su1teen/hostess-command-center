@@ -132,13 +132,31 @@
   --sidebar-ring: oklch(0.551 0.027 264.364);
 }
 
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  --color-status-free: #9FB9A2;
+  --color-status-booked: #C88484;
+  --color-status-served: #C9A96E;
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
+    font-style: normal !important;
   }
-
-  body {
-    background-color: var(--color-background);
+  html, body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    background-color: #f8fafc;
     color: var(--color-foreground);
+    font-style: normal;
   }
+  i, em, cite, address, dfn, var { font-style: normal; }
 }
+
+@utility glass {
+  background: color-mix(in oklab, white 65%, transparent);
+  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid color-mix(in oklab, white 60%, transparent);
+}
+
