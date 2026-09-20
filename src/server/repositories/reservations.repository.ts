@@ -10,6 +10,8 @@ import { pool, query } from "../db/pool";
 type ReservationRow = {
   id: string;
   external_id: string | null;
+  table_id: string | null;
+  table_label: string | null;
   guest_name: string;
   phone: string;
   guests: number;
@@ -51,6 +53,8 @@ function mapReservation(row: ReservationRow, preorders: ReservationPreorder[] = 
   return {
     id: row.id,
     externalId: row.external_id,
+    tableId: row.table_id,
+    tableLabel: row.table_label,
     guestName: row.guest_name,
     phone: row.phone,
     guests: Number(row.guests),
@@ -91,6 +95,29 @@ export async function listByRange(start: Date, end: Date): Promise<Reservation[]
   return attachPreorders(result.rows);
 }
 
+/**
+ * Active (not cancelled / no_show) reservations whose interval overlaps [start, end).
+ * One query for the whole hall; legacy rows without ends_at are treated as 2h long.
+ */
+export async function listActiveOverlapping(start: Date, end: Date): Promise<Reservation[]> {
+  const result = await query<ReservationRow>(
+    `SELECT * FROM command_center_reservations
+     WHERE status NOT IN ('cancelled', 'no_show')
+       AND starts_at < $2
+       AND COALESCE(ends_at, starts_at + interval '2 hours') > $1
+     ORDER BY starts_at ASC`,
+    [start, end],
+  );
+  return attachPreorders(result.rows);
+}
+
+export class ReservationConflictError extends Error {
+  constructor(public readonly conflicting: Reservation) {
+    super("Стол уже занят на это время");
+    this.name = "ReservationConflictError";
+  }
+}
+
 export async function getById(id: string): Promise<Reservation | null> {
   const result = await query<ReservationRow>(
     "SELECT * FROM command_center_reservations WHERE id = $1",
@@ -100,11 +127,13 @@ export async function getById(id: string): Promise<Reservation | null> {
 }
 
 export interface ReservationInsert {
+  tableId: string;
+  tableLabel: string;
   guestName: string;
   phone: string;
   guests: number;
   startsAt: string;
-  endsAt?: string;
+  endsAt: string;
   source: ReservationSource;
   depositAmount: number;
   depositStatus: DepositStatus;
@@ -118,17 +147,35 @@ export async function insert(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // Serialize concurrent inserts for the same table so the overlap check cannot race.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`cc-table:${input.tableId}`]);
+    const conflict = await client.query<ReservationRow>(
+      `SELECT * FROM command_center_reservations
+       WHERE table_id = $1
+         AND status NOT IN ('cancelled', 'no_show')
+         AND starts_at < $3
+         AND COALESCE(ends_at, starts_at + interval '2 hours') > $2
+       ORDER BY starts_at ASC
+       LIMIT 1`,
+      [input.tableId, input.startsAt, input.endsAt],
+    );
+    if (conflict.rows[0]) {
+      await client.query("ROLLBACK");
+      throw new ReservationConflictError(mapReservation(conflict.rows[0]));
+    }
     const reservation = await client.query<ReservationRow>(
       `INSERT INTO command_center_reservations
-        (guest_name, phone, guests, starts_at, ends_at, source, deposit_amount, deposit_status, comment)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        (table_id, table_label, guest_name, phone, guests, starts_at, ends_at, source, deposit_amount, deposit_status, comment)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [
+        input.tableId,
+        input.tableLabel,
         input.guestName,
         input.phone,
         input.guests,
         input.startsAt,
-        input.endsAt ?? null,
+        input.endsAt,
         input.source,
         input.depositAmount,
         input.depositStatus,
@@ -159,7 +206,7 @@ export async function insert(
       preorders.map((preorder, index) => ({ ...preorder, id: `new-${index}` })),
     );
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (!(error instanceof ReservationConflictError)) await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();

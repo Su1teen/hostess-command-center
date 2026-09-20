@@ -5,6 +5,7 @@ import type { DepositStatus, ReservationPreorder, ReservationStatus } from "../t
 import {
   createReservation as create,
   getReservationsBoard as getBoard,
+  getTableAvailability as getAvailability,
   setDepositStatus as setDeposit,
   setReservationStatus as setStatus,
 } from "../../server/services/reservations.service";
@@ -18,24 +19,39 @@ const preorderSchema = z.object({
 const sourceSchema = z.enum(["whatsapp", "instagram", "phone", "website", "manual", "other"]);
 const depositSchema = z.enum(["none", "pending", "paid", "refunded"]);
 const statusSchema = z.enum(["confirmed", "expected", "arrived", "cancelled", "no_show"]);
+const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
-export const getReservationsBoard = createServerFn({ method: "GET" }).handler(async () => {
-  try {
-    return await getBoard();
-  } catch (error) {
-    console.error("[reservations] getReservationsBoard failed", error);
-    throw new Error("База данных недоступна");
-  }
-});
+export const getReservationsBoard = createServerFn({ method: "GET" })
+  .inputValidator(z.object({ date: dateKeySchema.optional() }).default({}))
+  .handler(async ({ data }) => {
+    try {
+      return await getBoard(data.date);
+    } catch (error) {
+      console.error("[reservations] getReservationsBoard failed", error);
+      throw new Error("База данных недоступна");
+    }
+  });
+
+export const getTableAvailability = createServerFn({ method: "GET" })
+  .inputValidator(z.object({ startsAt: z.string().datetime(), endsAt: z.string().datetime() }))
+  .handler(async ({ data }) => {
+    try {
+      return await getAvailability(data.startsAt, data.endsAt);
+    } catch (error) {
+      console.error("[reservations] getTableAvailability failed", error);
+      throw new Error("База данных недоступна");
+    }
+  });
 
 export const createReservation = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
+      tableId: z.string().min(1),
       guestName: z.string().min(1),
       phone: z.string().min(5),
       guests: z.number().int().min(1).max(50),
       startsAt: z.string().datetime(),
-      endsAt: z.string().datetime().optional(),
+      endsAt: z.string().datetime(),
       source: sourceSchema,
       depositAmount: z.number().min(0).default(0),
       depositStatus: depositSchema.default("none"),

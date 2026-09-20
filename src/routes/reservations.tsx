@@ -1,9 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { ReservationsScreen } from "../components/reservations/ReservationsScreen";
-import { reservationsBoardQuery } from "../lib/queries/reservations";
-
+/** Compatibility deep link: reservations live inside the Hall screen now. */
 export const Route = createFileRoute("/reservations")({
-  loader: ({ context }) => context.queryClient.ensureQueryData(reservationsBoardQuery()),
-  component: ReservationsScreen,
+  beforeLoad: () => {
+    throw redirect({ to: "/", search: { reservations: true } });
+  },
 });
