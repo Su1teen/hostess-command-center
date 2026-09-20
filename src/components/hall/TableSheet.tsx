@@ -1,57 +1,129 @@
-import { X, Users } from "lucide-react";
+import { CalendarPlus, Users } from "lucide-react";
 import { formatKzt } from "../../lib/formatters/money";
-import { MOCK_TABLES } from "./mock";
+import { formatTimeRangeAlmaty } from "../../lib/formatters/time";
+import { findTable } from "../../lib/hall/layout";
+import {
+  DEPOSIT_STATUS_LABEL,
+  TABLE_OCCUPANCY_LABEL,
+  type Reservation,
+  type TableAvailabilityEntry,
+} from "../../lib/types/reservations";
+import { BottomSheet } from "../shared/BottomSheet";
+import { PhoneActions } from "../shared/PhoneActions";
+import { StatusPill } from "../shared/StatusPill";
+import { OCCUPANCY_COLOR } from "./FloorPlan";
 
-export function TableSheet({ tableId, onClose }: { tableId: string; onClose: () => void }) {
-  const table = MOCK_TABLES.find((item) => item.id === tableId);
+export function TableSheet({
+  tableId,
+  entry,
+  timeLabel,
+  dayReservations,
+  onClose,
+  onBook,
+  onOpenReservation,
+}: {
+  tableId: string;
+  entry: TableAvailabilityEntry | undefined;
+  timeLabel: string;
+  dayReservations: Reservation[];
+  onClose: () => void;
+  onBook: () => void;
+  onOpenReservation: (reservation: Reservation) => void;
+}) {
+  const table = findTable(tableId);
   if (!table) return null;
+  const status = entry?.status ?? "free";
+  const current = entry?.reservation ?? null;
+  const upcoming = dayReservations.filter(
+    (item) => item.tableId === tableId && item.id !== current?.id,
+  );
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/30"
-      onClick={onClose}
+    <BottomSheet
+      eyebrow={`${table.seats} мест · ${TABLE_OCCUPANCY_LABEL[status]} в ${timeLabel}`}
+      title={`Стол ${table.label}`}
+      onClose={onClose}
+      aside={
+        <span
+          className="h-3 w-3 rounded-full"
+          style={{ background: OCCUPANCY_COLOR[status] }}
+          aria-hidden
+        />
+      }
     >
-      <section
-        className="w-full max-w-md rounded-t-[2rem] bg-slate-50 p-5 shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-slate-500">Демонстрационный стол</p>
-            <h2 className="text-2xl font-bold">{table.label}</h2>
+      {current ? (
+        <button
+          type="button"
+          onClick={() => onOpenReservation(current)}
+          className="w-full rounded-3xl bg-white p-4 text-left shadow-sm"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-lg font-bold">{current.guestName}</p>
+              <p className="text-sm text-slate-500">
+                {formatTimeRangeAlmaty(current.startsAt, current.endsAt)}
+              </p>
+            </div>
+            <StatusPill status={current.status} />
           </div>
-          <button onClick={onClose} className="rounded-full bg-white p-2">
-            <X size={18} />
-          </button>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
+            <span className="flex items-center gap-1">
+              <Users size={14} /> {current.guests}
+            </span>
+            <span>{current.phone}</span>
+            <span className={current.depositStatus === "paid" ? "text-emerald-700" : ""}>
+              {current.depositAmount ? `${formatKzt(current.depositAmount)} · ` : ""}
+              {DEPOSIT_STATUS_LABEL[current.depositStatus]}
+            </span>
+          </div>
+          {current.comment && <p className="mt-2 text-sm text-slate-500">{current.comment}</p>}
+        </button>
+      ) : (
+        <div className="rounded-3xl bg-[#EEF4EF] p-4 text-sm text-slate-700">
+          Стол свободен на выбранное время
         </div>
-        <div className="space-y-2">
-          {table.bookings.length ? (
-            table.bookings.map((booking) => (
-              <div key={booking.start} className="rounded-2xl bg-white p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold">{booking.guest}</p>
-                    <p className="text-sm text-slate-500">
-                      {booking.start} – {booking.end}
-                    </p>
-                  </div>
-                  <span className="flex items-center gap-1 text-sm text-slate-500">
-                    <Users size={14} /> {booking.guests}
-                  </span>
-                </div>
-                {booking.deposit > 0 && (
-                  <p className="mt-2 text-sm text-slate-500">
-                    Задаток · {formatKzt(booking.deposit)}
-                  </p>
-                )}
-              </div>
-            ))
-          ) : (
-            <p className="rounded-2xl bg-white p-4 text-sm text-slate-500">
-              Броней нет · стол доступен весь день
-            </p>
-          )}
+      )}
+
+      {current && (
+        <div className="mt-3">
+          <PhoneActions phone={current.phone} />
         </div>
-      </section>
-    </div>
+      )}
+
+      {upcoming.length > 0 && (
+        <section className="mt-5">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Другие брони на этот день
+          </p>
+          <div className="space-y-2">
+            {upcoming.map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                onClick={() => onOpenReservation(item)}
+                className="flex w-full items-center justify-between rounded-2xl bg-white p-3 text-left text-sm"
+              >
+                <span>
+                  <span className="font-semibold">
+                    {formatTimeRangeAlmaty(item.startsAt, item.endsAt)}
+                  </span>{" "}
+                  · {item.guestName}
+                </span>
+                <StatusPill status={item.status} />
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {status === "free" && (
+        <button
+          type="button"
+          onClick={onBook}
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-4 font-semibold text-white"
+        >
+          <CalendarPlus size={18} /> Забронировать этот стол
+        </button>
+      )}
+    </BottomSheet>
   );
 }

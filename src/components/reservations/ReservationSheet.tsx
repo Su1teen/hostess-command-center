@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { formatKzt } from "../../lib/formatters/money";
-import { formatDateTimeAlmaty } from "../../lib/formatters/time";
+import { formatDateTimeAlmaty, formatTimeAlmaty } from "../../lib/formatters/time";
 import {
   DEPOSIT_STATUS_LABEL,
   RESERVATION_SOURCE_LABEL,
@@ -49,8 +49,12 @@ export function ReservationSheet({
         </div>
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <p className="font-semibold">{formatDateTimeAlmaty(reservation.startsAt)}</p>
+            <p className="font-semibold">
+              {formatDateTimeAlmaty(reservation.startsAt)}
+              {reservation.endsAt && ` – ${formatTimeAlmaty(reservation.endsAt)}`}
+            </p>
             <p className="text-sm text-slate-500">
+              {reservation.tableLabel ? `Стол ${reservation.tableLabel} · ` : ""}
               {reservation.guests} гостей · {RESERVATION_SOURCE_LABEL[reservation.source]}
             </p>
           </div>

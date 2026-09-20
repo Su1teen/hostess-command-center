@@ -10,6 +10,7 @@ import { CategoryBreakdown } from "./CategoryBreakdown";
 import { TopProducts } from "./TopProducts";
 import { SalesFilterTabs } from "./SalesFilterTabs";
 import { LastUpdated } from "./LastUpdated";
+import { AlcoholCatalog } from "../catalog/AlcoholCatalog";
 
 export function SalesScreen() {
   const [filter, setFilter] = useState<SalesFilter>("all");
@@ -31,7 +32,7 @@ export function SalesScreen() {
   const data = query.data;
   if (!data) return null;
   return (
-    <div className="space-y-5 px-4 pt-6">
+    <div className="space-y-5 px-4 pb-28 pt-6">
       <header>
         <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
           Аналитика · Сегодня
@@ -45,6 +46,7 @@ export function SalesScreen() {
       <HourlyRevenueChart data={data.hourly} />
       <CategoryBreakdown categories={data.categories} />
       <TopProducts items={data.top} />
+      <AlcoholCatalog />
       <p className="text-center text-[11px] text-slate-400">
         Биржа: {data.sources.exchangeLines} линий · iiko: {data.sources.iikoEvents} событий
       </p>

@@ -15,6 +15,8 @@ export interface ReservationPreorder {
 export interface Reservation {
   id: string;
   externalId: string | null;
+  tableId: string | null;
+  tableLabel: string | null;
   guestName: string;
   phone: string;
   guests: number;
@@ -32,6 +34,8 @@ export interface Reservation {
 }
 
 export interface ReservationsBoard {
+  /** YYYY-MM-DD in venue timezone */
+  date: string;
   dateLabel: string;
   kpis: {
     reservationsToday: number;
@@ -41,6 +45,31 @@ export interface ReservationsBoard {
   };
   upcoming: Reservation[];
 }
+
+export type TableOccupancy = "free" | "booked" | "seated";
+
+export interface TableAvailabilityEntry {
+  tableId: string;
+  status: TableOccupancy;
+  /** Reservation overlapping the requested window (if any). */
+  reservation: Reservation | null;
+}
+
+export interface TableAvailability {
+  startsAt: string;
+  endsAt: string;
+  tables: TableAvailabilityEntry[];
+}
+
+export type CreateReservationResult =
+  | { ok: true; reservation: Reservation }
+  | { ok: false; code: "conflict" | "invalid"; message: string };
+
+export const TABLE_OCCUPANCY_LABEL: Record<TableOccupancy, string> = {
+  free: "Свободен",
+  booked: "Забронирован",
+  seated: "Гости на месте",
+};
 
 export const RESERVATION_STATUS_LABEL: Record<ReservationStatus, string> = {
   confirmed: "Подтверждена",
