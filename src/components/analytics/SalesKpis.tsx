@@ -18,7 +18,7 @@ export function SalesKpis({ kpis }: { kpis: SalesKpisType }) {
           kpis.ordersCount === null
             ? "нет данных iiko"
             : kpis.averageCheck !== null
-              ? `Средний чек (iiko) ${formatKzt(kpis.averageCheck)}`
+              ? `Ср. чек (iiko) · ${formatKzt(kpis.averageCheck)}`
               : undefined
         }
         icon={<ShoppingBag size={15} />}

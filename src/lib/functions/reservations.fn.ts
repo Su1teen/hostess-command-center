@@ -22,7 +22,8 @@ const statusSchema = z.enum(["confirmed", "expected", "arrived", "cancelled", "n
 export const getReservationsBoard = createServerFn({ method: "GET" }).handler(async () => {
   try {
     return await getBoard();
-  } catch {
+  } catch (error) {
+    console.error("[reservations] getReservationsBoard failed", error);
     throw new Error("База данных недоступна");
   }
 });
@@ -45,7 +46,8 @@ export const createReservation = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     try {
       return await create(data, data.preorders as ReservationPreorder[]);
-    } catch {
+    } catch (error) {
+      console.error("[reservations] createReservation failed", error);
       throw new Error("База данных недоступна");
     }
   });
@@ -55,7 +57,8 @@ export const setReservationStatus = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     try {
       return await setStatus(data.id, data.status as ReservationStatus);
-    } catch {
+    } catch (error) {
+      console.error("[reservations] setReservationStatus failed", error);
       throw new Error("База данных недоступна");
     }
   });
@@ -65,7 +68,8 @@ export const setDepositStatus = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     try {
       return await setDeposit(data.id, data.status as DepositStatus);
-    } catch {
+    } catch (error) {
+      console.error("[reservations] setDepositStatus failed", error);
       throw new Error("База данных недоступна");
     }
   });

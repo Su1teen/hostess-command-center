@@ -8,7 +8,8 @@ export const getSalesDashboard = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     try {
       return await getSalesDashboardService(data.filter);
-    } catch {
+    } catch (error) {
+      console.error("[sales] getSalesDashboard failed", error);
       throw new Error("База данных недоступна");
     }
   });

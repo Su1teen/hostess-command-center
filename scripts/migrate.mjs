@@ -55,17 +55,29 @@ try {
     client.release();
   }
 } catch (error) {
-  if (
-    error instanceof pg.errors.ConnectionError ||
-    (error &&
-      typeof error === "object" &&
-      "code" in error &&
-      ["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT"].includes(error.code))
-  ) {
-    console.warn("[migrate] database unavailable; continuing without migrations.");
+  const errorCode =
+    error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const unavailableCodes = new Set([
+    "ECONNREFUSED",
+    "ENOTFOUND",
+    "ETIMEDOUT",
+    "ECONNRESET",
+    "EAI_AGAIN",
+    "EHOSTUNREACH",
+    "28P01",
+    "28000",
+    "3D000",
+    "57P03",
+  ]);
+
+  if (unavailableCodes.has(errorCode)) {
+    console.warn(
+      `[migrate] database unavailable (${errorCode}): ${errorMessage}; continuing without migrations.`,
+    );
     process.exitCode = 0;
   } else {
-    console.error("[migrate] migration failed.");
+    console.error(`[migrate] migration failed (${errorCode}): ${errorMessage}`);
     process.exitCode = 1;
   }
 } finally {
