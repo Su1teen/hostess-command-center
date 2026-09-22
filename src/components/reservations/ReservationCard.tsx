@@ -48,7 +48,7 @@ export function ReservationCard({
         </span>
         {reservation.preorders.length > 0 && (
           <span className="font-semibold text-slate-700">
-            {reservation.preorders.length} поз. · {formatKzt(reservation.preorderTotal)}
+            {reservation.preorders.length} позиция · {formatKzt(reservation.preorderTotal)}
           </span>
         )}
       </div>

@@ -36,7 +36,7 @@ export function BottomSheet({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Закрыть"
+              aria-label="Жабу"
               className="rounded-full bg-white p-2 shadow-sm"
             >
               <X size={18} />

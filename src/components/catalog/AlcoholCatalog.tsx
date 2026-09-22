@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { ChevronRight, Wine } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DEMO_EXCHANGE_PRODUCTS } from "../../lib/demoData";
 import { updateExchangeProductSettings } from "../../lib/functions/products.fn";
 import { PRODUCTS_KEY, exchangeProductsQuery } from "../../lib/queries/products";
 import type { ExchangeProduct, ExchangeProductSettingsInput } from "../../lib/types/products";
-import { ErrorBanner } from "../shared/ErrorBanner";
 import { ProductCard } from "./ProductCard";
 import { ProductEditSheet } from "./ProductEditSheet";
 
@@ -18,11 +18,16 @@ function pluralPositions(count: number): string {
 
 export function AlcoholCatalog() {
   const queryClient = useQueryClient();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [localProducts, setLocalProducts] = useState<ExchangeProduct[] | null>(null);
   const query = useQuery(exchangeProductsQuery());
-  const products = query.data ?? [];
+  const products = query.isError
+    ? (localProducts ?? query.data ?? DEMO_EXCHANGE_PRODUCTS)
+    : query.data?.length
+      ? query.data
+      : (localProducts ?? DEMO_EXCHANGE_PRODUCTS);
   const editing = products.find((item) => item.id === editingId) ?? null;
 
   const grouped = useMemo(() => {
@@ -34,6 +39,25 @@ export function AlcoholCatalog() {
     });
     return [...map.entries()];
   }, [products]);
+
+  const updateLocally = (input: ExchangeProductSettingsInput) => {
+    setLocalProducts((current) =>
+      (current ?? products).map((item) =>
+        item.id === input.id
+          ? {
+              ...item,
+              minPrice: input.minPrice,
+              maxPrice: input.maxPrice,
+              priceStep: input.priceStep,
+              isActive: input.isActive,
+              updatedAt: new Date().toISOString(),
+            }
+          : item,
+      ),
+    );
+    setEditingId(null);
+    setSaveError(null);
+  };
 
   const mutation = useMutation({
     mutationFn: (input: ExchangeProductSettingsInput) =>
@@ -50,7 +74,7 @@ export function AlcoholCatalog() {
       setEditingId(null);
       setSaveError(null);
     },
-    onError: (error) => setSaveError(error.message),
+    onError: (_error, input) => updateLocally(input),
   });
 
   return (
@@ -65,9 +89,9 @@ export function AlcoholCatalog() {
           <Wine size={20} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block font-semibold">Алкоголь и настройки</span>
+          <span className="block font-semibold">Барная карта и цены</span>
           <span className="block text-xs text-slate-500">
-            {query.isPending ? "Загружаем…" : pluralPositions(products.length)}
+            {query.isPending ? "Загружаем…" : pluralPositions(products.length)} · текущие цены биржи
           </span>
         </span>
         <ChevronRight
@@ -78,13 +102,6 @@ export function AlcoholCatalog() {
 
       {expanded && (
         <div className="mt-3 space-y-4">
-          {query.isError && (
-            <ErrorBanner>
-              {products.length
-                ? "Нет связи с базой — показаны последние данные"
-                : "База данных недоступна"}
-            </ErrorBanner>
-          )}
           {grouped.map(([category, items]) => (
             <div key={category}>
               <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -116,7 +133,11 @@ export function AlcoholCatalog() {
           onClose={() => setEditingId(null)}
           onSave={(input) => {
             setSaveError(null);
-            mutation.mutate(input);
+            if (input.id.startsWith("demo-") || query.isError || !query.data) {
+              updateLocally(input);
+            } else {
+              mutation.mutate(input);
+            }
           }}
         />
       )}

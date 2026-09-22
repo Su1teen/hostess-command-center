@@ -31,7 +31,6 @@ import {
 } from "../reservations/CreateReservationSheet";
 import { ReservationSheet } from "../reservations/ReservationSheet";
 import { roundTimeUp } from "../shared/DateTimeWheel";
-import { ErrorBanner } from "../shared/ErrorBanner";
 import { DateTimeSelector } from "./DateTimeSelector";
 import { FloorPlan, OCCUPANCY_COLOR } from "./FloorPlan";
 import { ReservationsPanel } from "./ReservationsPanel";
@@ -107,8 +106,6 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
     onError: (error) => setCreateError(error.message),
   });
 
-  const dbError = availability.isError && !availability.data;
-
   return (
     <div className="space-y-4 px-4 pb-52 pt-6">
       <header>
@@ -120,20 +117,15 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
 
       <DateTimeSelector date={date} time={time} onDate={setDate} onTime={setTime} />
 
-      {dbError ? (
-        <ErrorBanner>Нет связи с базой — занятость столов недоступна</ErrorBanner>
-      ) : (
-        availability.isError && (
-          <ErrorBanner>Нет связи с базой — показаны последние данные</ErrorBanner>
-        )
-      )}
-
       <FloorPlan
         occupancy={occupancy}
         selectedId={selectedTable}
         onSelect={setSelectedTable}
         stale={availability.isFetching && availability.isPlaceholderData}
       />
+      <p className="-mt-2 px-1 text-center text-[11px] text-slate-400">
+        Нажмите на стол, чтобы выбрать · двумя пальцами можно перемещать и масштабировать карту
+      </p>
 
       <div className="grid grid-cols-3 gap-2 text-center text-xs text-slate-500">
         {LEGEND.map((status) => (

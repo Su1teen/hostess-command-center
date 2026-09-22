@@ -78,7 +78,11 @@ export async function createReservation(
   const table = findTable(input.tableId);
   if (!table) return { ok: false, code: "invalid", message: "Такого стола нет в зале" };
   if (new Date(input.endsAt) <= new Date(input.startsAt))
-    return { ok: false, code: "invalid", message: "Время окончания должно быть позже начала" };
+    return {
+      ok: false,
+      code: "invalid",
+      message: "Время окончания должно быть позже начала",
+    };
   try {
     const reservation = await reservations.insert(
       { ...input, tableLabel: table.label },

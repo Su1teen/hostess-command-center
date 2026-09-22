@@ -12,19 +12,19 @@ export function SalesKpis({ kpis }: { kpis: SalesKpisType }) {
         icon={<Wallet size={15} />}
       />
       <KpiCard
-        label="Заказов"
+        label="Сделок биржи"
         value={kpis.ordersCount === null ? "—" : String(kpis.ordersCount)}
         subtitle={
           kpis.ordersCount === null
-            ? "нет данных iiko"
+            ? "только барные продажи"
             : kpis.averageCheck !== null
-              ? `Ср. чек (iiko) · ${formatKzt(kpis.averageCheck)}`
+              ? `Средняя продажа · ${formatKzt(kpis.averageCheck)}`
               : undefined
         }
         icon={<ShoppingBag size={15} />}
       />
       <KpiCard label="Продано позиций" value={String(kpis.itemsSold)} />
-      <KpiCard label="Алкоголь" value={formatKzt(kpis.alcoholRevenue)} />
+      <KpiCard label="Барная выручка" value={formatKzt(kpis.alcoholRevenue)} />
     </div>
   );
 }

@@ -12,7 +12,7 @@ export function SalesFilterTabs({
       {(
         [
           ["all", "Все"],
-          ["alcohol", "Алкоголь"],
+          ["alcohol", "Бар"],
           ["kitchen", "Кухня"],
         ] as const
       ).map(([key, label]) => (

@@ -43,7 +43,7 @@ export function ReservationSheet({
             <p className="text-xs uppercase tracking-wide text-slate-500">Детали брони</p>
             <h2 className="mt-1 text-2xl font-bold">{reservation.guestName}</h2>
           </div>
-          <button onClick={onClose} className="rounded-full bg-white p-2">
+          <button onClick={onClose} className="rounded-full bg-white p-2" aria-label="Закрыть">
             <X size={18} />
           </button>
         </div>

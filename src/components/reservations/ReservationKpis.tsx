@@ -7,7 +7,7 @@ export function ReservationKpis({ kpis }: { kpis: ReservationsBoard["kpis"] }) {
   return (
     <div className="grid grid-cols-2 gap-3">
       <KpiCard
-        label="Броней сегодня"
+        label="Брони сегодня"
         value={String(kpis.reservationsToday)}
         icon={<CalendarDays size={15} />}
       />
@@ -17,7 +17,7 @@ export function ReservationKpis({ kpis }: { kpis: ReservationsBoard["kpis"] }) {
         icon={<Users size={15} />}
       />
       <KpiCard label="Задатков" value={formatKzt(kpis.depositsTotal)} icon={<Wallet size={15} />} />
-      <KpiCard label="Предзаказов" value={formatKzt(kpis.preordersTotal)} />
+      <KpiCard label="Алдын ала тапсырыс" value={formatKzt(kpis.preordersTotal)} />
     </div>
   );
 }

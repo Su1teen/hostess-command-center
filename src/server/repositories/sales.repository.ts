@@ -52,7 +52,7 @@ export async function getSalesDashboard(filter: SalesFilter): Promise<SalesDashb
           AND COALESCE(se.occurred_at, se.received_at) >= $1
           AND COALESCE(se.occurred_at, se.received_at) < $2
           AND COALESCE(p.is_exchange_product, false) = false
-          AND ($3 = 'all' OR ($3 = 'alcohol' AND COALESCE(p.is_drink_candidate, false)) OR ($3 = 'kitchen' AND NOT COALESCE(p.is_drink_candidate, false)))
+          AND false
       ),
       kpis AS (
         SELECT
@@ -96,7 +96,7 @@ export async function getSalesDashboard(filter: SalesFilter): Promise<SalesDashb
     top_items: NumericRow[];
   };
   const kpis = row.kpis ?? {};
-  const orderCount = Number(kpis.orders_count ?? 0);
+  const exchangeCount = Number(kpis.exchange_lines ?? 0);
   const categories = (row.categories ?? []).map((item) => ({
     category: String(item.category),
     revenue: Number(item.revenue ?? 0),
@@ -134,8 +134,8 @@ export async function getSalesDashboard(filter: SalesFilter): Promise<SalesDashb
       revenue: Number(kpis.revenue ?? 0),
       itemsSold: Number(kpis.items_sold ?? 0),
       alcoholRevenue: Number(kpis.alcohol_revenue ?? 0),
-      ordersCount: Number(kpis.iiko_events ?? 0) === 0 ? null : orderCount,
-      averageCheck: orderCount ? Number(kpis.priced_order_revenue ?? 0) / orderCount : null,
+      ordersCount: exchangeCount,
+      averageCheck: exchangeCount ? Number(kpis.revenue ?? 0) / exchangeCount : null,
     },
     hourly,
     categories,

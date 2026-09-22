@@ -230,7 +230,7 @@ export function CreateReservationSheet({
               type="number"
               inputMode="numeric"
               {...register("depositAmount", { valueAsNumber: true, min: 0 })}
-              placeholder="Задаток, ₸"
+              placeholder="Задаток, KZT"
               className="field"
             />
             <select {...register("depositStatus")} className="field">

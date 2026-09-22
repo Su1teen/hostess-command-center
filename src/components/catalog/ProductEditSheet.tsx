@@ -3,7 +3,6 @@ import { formatKzt } from "../../lib/formatters/money";
 import { resolveProductImage } from "../../lib/products/images";
 import type { ExchangeProduct, ExchangeProductSettingsInput } from "../../lib/types/products";
 import { BottomSheet } from "../shared/BottomSheet";
-import { ErrorBanner } from "../shared/ErrorBanner";
 
 function ReadOnly({ label, value }: { label: string; value: string }) {
   return (
@@ -86,7 +85,7 @@ export function ProductEditSheet({
         <div>
           <p className="text-[11px] uppercase tracking-wide text-slate-500">Текущая цена</p>
           <p className="text-3xl font-bold tabular-nums">{formatKzt(product.currentPrice)}</p>
-          <p className="text-xs text-slate-500">управляется биржей · только чтение</p>
+          <p className="text-xs text-slate-500">Управляется биржей · только чтение</p>
         </div>
       </div>
 
@@ -98,10 +97,10 @@ export function ProductEditSheet({
       <section className="mt-5 space-y-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Коридор цены</p>
         <div className="grid grid-cols-2 gap-2">
-          <NumberField label="Минимум, ₸" value={minPrice} onChange={setMinPrice} />
-          <NumberField label="Максимум, ₸" value={maxPrice} onChange={setMaxPrice} />
+          <NumberField label="Минимум, KZT" value={minPrice} onChange={setMinPrice} />
+          <NumberField label="Максимум, KZT" value={maxPrice} onChange={setMaxPrice} />
         </div>
-        <NumberField label="Шаг цены, ₸" value={priceStep} onChange={setPriceStep} />
+        <NumberField label="Шаг цены, KZT" value={priceStep} onChange={setPriceStep} />
         <button
           type="button"
           onClick={() => setIsActive((value) => !value)}
@@ -125,9 +124,9 @@ export function ProductEditSheet({
       </section>
 
       {(localError || serverError) && (
-        <div className="mt-4">
-          <ErrorBanner>{localError ?? serverError}</ErrorBanner>
-        </div>
+        <p className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {localError ?? serverError ?? "Не удалось сохранить изменения"}
+        </p>
       )}
 
       <button

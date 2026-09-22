@@ -1,9 +1,11 @@
-import { BarChart3, Map as MapIcon } from "lucide-react";
+import { ChefHat, LayoutDashboard, Map as MapIcon, Truck } from "lucide-react";
 import { Link, useRouterState } from "@tanstack/react-router";
 
 const items = [
   { to: "/", label: "Зал", icon: MapIcon },
-  { to: "/sales", label: "Продажи", icon: BarChart3 },
+  { to: "/dashboard", label: "Обзор", icon: LayoutDashboard },
+  { to: "/menu", label: "Меню", icon: ChefHat },
+  { to: "/suppliers", label: "Поставки", icon: Truck },
 ] as const;
 
 export function BottomNav() {
@@ -18,7 +20,7 @@ export function BottomNav() {
             to={to}
             activeProps={{ className: "bg-slate-900 text-white" }}
             inactiveProps={{ className: "text-slate-500" }}
-            className={`flex min-w-28 flex-col items-center gap-1 rounded-full px-4 py-2 text-[11px] font-semibold transition-colors ${active ? "bg-slate-900 text-white" : "text-slate-500"}`}
+            className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-full px-2 py-2 text-[10px] font-semibold transition-colors ${active ? "bg-slate-900 text-white" : "text-slate-500"}`}
           >
             <Icon size={18} strokeWidth={active ? 2.5 : 2} />
             {label}

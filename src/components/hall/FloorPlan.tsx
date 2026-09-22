@@ -88,12 +88,19 @@ export function FloorPlan({
   }, []);
 
   const fitted = useRef(false);
+  const previousWidth = useRef(0);
   useEffect(() => {
     if (size.width && !fitted.current) {
       fitted.current = true;
       fit();
     }
   }, [size, fit]);
+
+  useEffect(() => {
+    if (!size.width) return;
+    if (previousWidth.current && previousWidth.current !== size.width) fit();
+    previousWidth.current = size.width;
+  }, [size.width, fit]);
 
   const apply = (next: View) => setView(clampView(next, size.width, size.height));
 
@@ -125,9 +132,23 @@ export function FloorPlan({
   };
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    containerRef.current?.setPointerCapture(event.pointerId);
-    pointers.current.set(event.pointerId, localPoint(event));
-    if (pointers.current.size === 1) moved.current = false;
+    const point = localPoint(event);
+    pointers.current.set(event.pointerId, point);
+
+    if (pointers.current.size === 1) {
+      moved.current = false;
+      gesture.current = { start: point, view: viewRef.current, dist: 0, mid: point };
+      // A single touch is reserved for page scrolling and table taps. Mouse users can still pan.
+      if (event.pointerType === "mouse") containerRef.current?.setPointerCapture(event.pointerId);
+      return;
+    }
+
+    // A second touch explicitly opts into map navigation. This prevents the map from
+    // stealing the page's vertical scroll during normal one-thumb use.
+    for (const pointerId of pointers.current.keys()) {
+      containerRef.current?.setPointerCapture(pointerId);
+    }
+    moved.current = true;
     const { mid, dist } = snapshot();
     gesture.current = { start: mid, view: viewRef.current, dist, mid };
   };
@@ -140,7 +161,6 @@ export function FloorPlan({
     if (Math.hypot(mid.x - g.start.x, mid.y - g.start.y) > TAP_SLOP) moved.current = true;
 
     if (pointers.current.size >= 2 && g.dist > 0) {
-      moved.current = true;
       const factor = dist / g.dist;
       const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, g.view.scale * factor));
       const ratio = scale / g.view.scale;
@@ -149,7 +169,7 @@ export function FloorPlan({
         tx: mid.x - (g.mid.x - g.view.tx) * ratio,
         ty: mid.y - (g.mid.y - g.view.ty) * ratio,
       });
-    } else {
+    } else if (event.pointerType === "mouse") {
       apply({
         scale: g.view.scale,
         tx: g.view.tx + (mid.x - g.start.x),
@@ -230,8 +250,15 @@ export function FloorPlan({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onTouchMove={(event) => {
+          if (event.touches.length > 1) event.preventDefault();
+        }}
         className={`relative w-full select-none overflow-hidden transition-opacity ${stale ? "opacity-70" : ""}`}
-        style={{ height: VIEW_HEIGHT, touchAction: "none" }}
+        style={{
+          height: VIEW_HEIGHT,
+          touchAction: "pan-y",
+          overscrollBehaviorX: "contain",
+        }}
       >
         <svg
           width={FLOOR_WIDTH}

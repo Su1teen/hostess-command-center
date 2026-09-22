@@ -28,7 +28,7 @@ export function TopProducts({ items }: { items: TopSale[] }) {
                 <span
                   className={`text-[9px] font-bold uppercase ${item.source === "exchange" ? "text-amber-700" : "text-slate-500"}`}
                 >
-                  {item.source === "exchange" ? "биржа" : "iiko"}
+                  биржа
                 </span>
               </div>
             </div>
