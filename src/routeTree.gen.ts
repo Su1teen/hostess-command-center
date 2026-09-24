@@ -14,6 +14,7 @@ import { Route as SalesRouteImport } from './routes/sales'
 import { Route as ReservationsRouteImport } from './routes/reservations'
 import { Route as MenuRouteImport } from './routes/menu'
 import { Route as HealthRouteImport } from './routes/health'
+import { Route as GuestsRouteImport } from './routes/guests'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -42,6 +43,11 @@ const HealthRoute = HealthRouteImport.update({
   path: '/health',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GuestsRoute = GuestsRouteImport.update({
+  id: '/guests',
+  path: '/guests',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -56,6 +62,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/guests': typeof GuestsRoute
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
   '/reservations': typeof ReservationsRoute
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/guests': typeof GuestsRoute
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
   '/reservations': typeof ReservationsRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/guests': typeof GuestsRoute
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
   '/reservations': typeof ReservationsRoute
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/dashboard'
+    | '/guests'
     | '/health'
     | '/menu'
     | '/reservations'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/dashboard'
+    | '/guests'
     | '/health'
     | '/menu'
     | '/reservations'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/dashboard'
+    | '/guests'
     | '/health'
     | '/menu'
     | '/reservations'
@@ -114,6 +126,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  GuestsRoute: typeof GuestsRoute
   HealthRoute: typeof HealthRoute
   MenuRoute: typeof MenuRoute
   ReservationsRoute: typeof ReservationsRoute
@@ -158,6 +171,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HealthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/guests': {
+      id: '/guests'
+      path: '/guests'
+      fullPath: '/guests'
+      preLoaderRoute: typeof GuestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
@@ -178,6 +198,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  GuestsRoute: GuestsRoute,
   HealthRoute: HealthRoute,
   MenuRoute: MenuRoute,
   ReservationsRoute: ReservationsRoute,
