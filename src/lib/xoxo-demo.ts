@@ -9,6 +9,7 @@ const groups: [string, number, string][] = [
   ["Квас", 890, "Разливные"], ["Лимонад", 890, "Разливные"], ["Немецкое · 500 мл", 1190, "Разливные"], ["Немецкое · 3 л", 6000, "Разливные"], ["Carlsberg · 500 мл", 1500, "Разливные"], ["Carlsberg · 3 л", 8500, "Разливные"],
   ["Gorilla", 1500, "Энергетики"], ["Dizzy", 1500, "Энергетики"], ["Red Bull", 2000, "Энергетики"], ["Borjomi", 2000, "Вода"], ["Tassay · 250 мл", 900, "Вода"], ["Tassay · 500 мл", 900, "Вода"], ["Tassay газ · 500 мл", 900, "Вода"], ["Tassay · 1 л", 1500, "Вода"], ["Сарыагаш", 1000, "Вода"],
   ["Ягодный", 2490, "Лимонады"], ["Арбузный", 2490, "Лимонады"], ["Манго-маракуйя", 2490, "Лимонады"], ["Киви-лайм", 2490, "Лимонады"], ["Мохито", 2490, "Лимонады"], ["Тамерланский чай", 2590, "Чай"], ["Облепиховый чай", 2590, "Чай"], ["Малиновый чай", 2590, "Чай"], ["Смородиновый чай", 2590, "Чай"],
+  ["Maxi Чай", 1500, "Чай"], ["Натуральный сок", 2500, "Соки"], ["Tassay · 500 мл стекло", 1000, "Вода"],
 ];
 
 export const defaultDrinks: DemoDrink[] = groups.map(([name, price, category], index) => ({ id: `photo-${index}`, name, price, category, active: true, sold: category === "Коктейли" && name === "Mojito" ? 62 : name === "Red Bull Vodka" ? 54 : name === "Long Island" ? 43 : name === "Coca-Cola · 500 мл" ? 39 : Math.max(2, 18 - Math.floor(index / 3)) }));
@@ -29,7 +30,11 @@ export function readDemoAdmin(): DemoAdminState {
     const stored = window.localStorage.getItem(key);
     if (stored) {
       const parsed: unknown = JSON.parse(stored);
-      if (parsed && typeof parsed === "object" && "drinks" in parsed && "orders" in parsed && Array.isArray(parsed.drinks) && Array.isArray(parsed.orders)) return parsed as DemoAdminState;
+      if (parsed && typeof parsed === "object" && "drinks" in parsed && "orders" in parsed && Array.isArray(parsed.drinks) && Array.isArray(parsed.orders)) {
+        const state = parsed as DemoAdminState;
+        const existing = new Set(state.drinks.map((drink) => drink.id));
+        return { ...state, drinks: [...state.drinks, ...defaultDrinks.filter((drink) => !existing.has(drink.id))] };
+      }
     }
   } catch { /* Browser storage can be unavailable. */ }
   return { drinks: defaultDrinks, orders: seedOrders };
