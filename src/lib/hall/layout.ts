@@ -16,26 +16,18 @@ export const FLOOR_WIDTH = 500;
 export const FLOOR_HEIGHT = 550;
 
 export const HALL_TABLES: HallTable[] = [
-  { id: "A1", label: "A1", x: 60, y: 90, w: 68, h: 68, seats: 4, shape: "round" },
-  { id: "A2", label: "A2", x: 160, y: 90, w: 68, h: 68, seats: 4, shape: "round" },
-  { id: "A3", label: "A3", x: 260, y: 90, w: 68, h: 68, seats: 4, shape: "round" },
-  { id: "A4", label: "A4", x: 360, y: 90, w: 68, h: 68, seats: 4, shape: "round" },
-  { id: "B1", label: "B1", x: 60, y: 210, w: 90, h: 60, seats: 6, shape: "rect" },
-  { id: "B2", label: "B2", x: 180, y: 210, w: 90, h: 60, seats: 6, shape: "rect" },
-  { id: "B3", label: "B3", x: 300, y: 210, w: 90, h: 60, seats: 6, shape: "rect" },
-  { id: "C1", label: "C1", x: 90, y: 320, w: 80, h: 80, seats: 6, shape: "round" },
-  { id: "C2", label: "C2", x: 230, y: 320, w: 80, h: 80, seats: 6, shape: "round" },
-  { id: "C3", label: "C3", x: 370, y: 320, w: 60, h: 60, seats: 2, shape: "round" },
-  ...Array.from({ length: 7 }, (_, index) => ({
-    id: `Bar${index + 1}`,
-    label: `Bar ${index + 1}`,
-    x: 60 + index * 55,
-    y: 460,
-    w: 40,
-    h: 40,
-    seats: 1,
-    shape: "bar" as const,
-  })),
+  // Three wide rectangular tables at the top, four smaller ones beneath them.
+  { id: "A1", label: "A1", x: 42, y: 92, w: 118, h: 62, seats: 6, shape: "rect" },
+  { id: "A2", label: "A2", x: 191, y: 92, w: 118, h: 62, seats: 6, shape: "rect" },
+  { id: "A3", label: "A3", x: 340, y: 92, w: 118, h: 62, seats: 6, shape: "rect" },
+  { id: "B1", label: "B1", x: 42, y: 222, w: 82, h: 54, seats: 4, shape: "rect" },
+  { id: "B2", label: "B2", x: 144, y: 222, w: 82, h: 54, seats: 4, shape: "rect" },
+  { id: "B3", label: "B3", x: 246, y: 222, w: 82, h: 54, seats: 4, shape: "rect" },
+  { id: "B4", label: "B4", x: 348, y: 222, w: 82, h: 54, seats: 4, shape: "rect" },
+  // Two round tables and the bar are placed along the right-hand side.
+  { id: "C1", label: "C1", x: 352, y: 326, w: 66, h: 66, seats: 4, shape: "round" },
+  { id: "C2", label: "C2", x: 352, y: 422, w: 66, h: 66, seats: 4, shape: "round" },
+  { id: "Bar", label: "Бар", x: 435, y: 330, w: 34, h: 158, seats: 6, shape: "bar" },
 ];
 
 export const TV_SCREENS = [

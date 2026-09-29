@@ -18,7 +18,7 @@ function pluralPositions(count: number): string {
 
 export function AlcoholCatalog() {
   const queryClient = useQueryClient();
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [localProducts, setLocalProducts] = useState<ExchangeProduct[] | null>(null);

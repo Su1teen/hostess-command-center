@@ -101,8 +101,8 @@ export function MenuScreen() {
         </div>
       </section>
 
-      <XoxoDrinkCatalog />
       <AlcoholCatalog />
+      <XoxoDrinkCatalog />
 
       <section className="grid grid-cols-3 gap-2">
         <div className="rounded-2xl bg-white p-3 shadow-sm">

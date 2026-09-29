@@ -107,14 +107,15 @@ export function ProductEditSheet({
           className="flex w-full items-center justify-between rounded-2xl bg-white p-4"
           aria-pressed={isActive}
         >
-          <span>
+          <span className="min-w-0 pr-3 text-left">
             <span className="block font-semibold">{isActive ? "Активен" : "Выключен"}</span>
             <span className="block text-xs text-slate-500">
               {isActive ? "Участвует в торгах на бирже" : "Скрыт с биржи"}
             </span>
           </span>
           <span
-            className={`relative h-7 w-12 rounded-full transition-colors ${isActive ? "bg-slate-900" : "bg-slate-300"}`}
+            aria-hidden="true"
+            className={`relative h-7 w-12 shrink-0 overflow-hidden rounded-full transition-colors ${isActive ? "bg-slate-900" : "bg-slate-300"}`}
           >
             <span
               className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${isActive ? "translate-x-5" : "translate-x-0.5"}`}
