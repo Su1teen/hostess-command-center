@@ -1,3 +1,4 @@
+import { StaffMove } from "./StaffMove";
 import { X } from "lucide-react";
 import { formatKzt } from "../../lib/formatters/money";
 import { formatDateTimeAlmaty, formatTimeAlmaty } from "../../lib/formatters/time";
@@ -12,6 +13,7 @@ import { PhoneActions } from "../shared/PhoneActions";
 import { StatusPill } from "../shared/StatusPill";
 
 const actions: [ReservationStatus, string][] = [
+  ["confirmed", "Подтвердить"],
   ["expected", "Ожидается"],
   ["arrived", "Пришли"],
   ["no_show", "Не пришли"],
@@ -23,8 +25,10 @@ export function ReservationSheet({
   onClose,
   onStatus,
   onDeposit,
+  onMoved,
 }: {
   reservation: Reservation;
+  onMoved?: (r: Reservation) => void;
   onClose: () => void;
   onStatus: (status: ReservationStatus) => void;
   onDeposit: (status: DepositStatus) => void;
@@ -61,6 +65,7 @@ export function ReservationSheet({
           <StatusPill status={reservation.status} />
         </div>
         <PhoneActions phone={reservation.phone} />
+        <StaffMove reservation={reservation} onMoved={onMoved} />
         <div className="mt-5 space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Статус</p>
           <div className="grid grid-cols-2 gap-2">

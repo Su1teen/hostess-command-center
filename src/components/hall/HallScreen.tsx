@@ -115,6 +115,11 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
         <h1 className="mt-1 text-2xl font-bold tracking-tight">Зал</h1>
       </header>
 
+      {(statusMutation.error || depositMutation.error) && (
+        <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">
+          {statusMutation.error?.message ?? depositMutation.error?.message}
+        </p>
+      )}
       <DateTimeSelector date={date} time={time} onDate={setDate} onTime={setTime} />
 
       <FloorPlan
@@ -169,6 +174,7 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
       {selectedReservation && (
         <ReservationSheet
           reservation={selectedReservation}
+          onMoved={setSelectedReservation}
           onClose={() => setSelectedReservation(null)}
           onStatus={(status) => statusMutation.mutate({ id: selectedReservation.id, status })}
           onDeposit={(status) => depositMutation.mutate({ id: selectedReservation.id, status })}

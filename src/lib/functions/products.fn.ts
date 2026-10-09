@@ -1,3 +1,4 @@
+import { requireStaff } from "../../server/guest/auth";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -7,10 +8,11 @@ import {
 } from "../../server/services/products.service";
 
 export const getExchangeProducts = createServerFn({ method: "GET" }).handler(async () => {
+  await requireStaff();
   try {
     return await listProducts();
   } catch (error) {
-    console.error("[products] getExchangeProducts failed", error);
+    console.error("[command-center] operation failed");
     throw new Error("База данных недоступна");
   }
 });
@@ -26,10 +28,11 @@ export const updateExchangeProductSettings = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
+    await requireStaff(true, true);
     try {
       return await updateSettings(data);
     } catch (error) {
-      console.error("[products] updateExchangeProductSettings failed", error);
+      console.error("[command-center] operation failed");
       throw new Error("База данных недоступна");
     }
   });

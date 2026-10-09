@@ -15,6 +15,7 @@ export interface ReservationPreorder {
 export interface Reservation {
   id: string;
   externalId: string | null;
+  tableIds: string[];
   tableId: string | null;
   tableLabel: string | null;
   guestName: string;

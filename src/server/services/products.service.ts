@@ -1,3 +1,5 @@
+import { exchangeRequest, exchangeApiEnabled } from "./exchange-bridge";
+import { requireStaff } from "../guest/auth";
 import type {
   ExchangeProduct,
   ExchangeProductSettingsInput,
@@ -6,7 +8,9 @@ import type {
 import * as products from "../repositories/products.repository";
 
 export function listExchangeProducts(): Promise<ExchangeProduct[]> {
-  return products.listExchangeProducts();
+  return exchangeApiEnabled()
+    ? exchangeRequest<ExchangeProduct[]>("/products")
+    : products.listExchangeProducts();
 }
 
 export function validateProductSettings(input: ExchangeProductSettingsInput): string | null {
@@ -24,7 +28,14 @@ export async function updateProductSettings(
 ): Promise<UpdateProductResult> {
   const error = validateProductSettings(input);
   if (error) return { ok: false, message: error };
-  const product = await products.updateExchangeProductSettings(input);
+  const { id, ...settings } = input;
+  const product = exchangeApiEnabled()
+    ? await exchangeRequest<ExchangeProduct>(
+        `/products/${id}`,
+        settings,
+        (await requireStaff(true, true)).staff_id ?? undefined,
+      )
+    : await products.updateExchangeProductSettings(input);
   if (!product) return { ok: false, message: "Товар не найден" };
   return { ok: true, product };
 }

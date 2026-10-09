@@ -1,3 +1,4 @@
+import { actor, requireStaff, transaction } from "../guest/auth";
 /*
  * exchange_products is the working catalog of the XOXO pricing engine.
  * Command Center only reads it and edits the pricing corridor
@@ -70,12 +71,21 @@ export async function getExchangeProduct(id: string): Promise<ExchangeProduct | 
 export async function updateExchangeProductSettings(
   input: ExchangeProductSettingsInput,
 ): Promise<ExchangeProduct | null> {
-  const result = await query<{ id: string }>(
-    `UPDATE exchange_products
+  const staff = await requireStaff(true, true);
+  const result = await transaction(async (client) => {
+    const updated = await client.query<{ id: string }>(
+      `UPDATE exchange_products
      SET min_price = $2, max_price = $3, price_step = $4, is_active = $5, updated_at = now()
      WHERE id = $1
      RETURNING id`,
-    [input.id, input.minPrice, input.maxPrice, input.priceStep, input.isActive],
-  );
+      [input.id, input.minPrice, input.maxPrice, input.priceStep, input.isActive],
+    );
+    await actor(client, `staff:${staff.staff_id}`);
+    await client.query(
+      "INSERT INTO hostess_audit(actor,action,entity_id,details) VALUES($1,'product_settings',$2,$3)",
+      [`staff:${staff.staff_id}`, input.id, JSON.stringify(input)],
+    );
+    return updated;
+  });
   return result.rows[0] ? getExchangeProduct(input.id) : null;
 }

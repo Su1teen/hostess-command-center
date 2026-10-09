@@ -1,34 +1,170 @@
-import { Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, Pencil, ReceiptText, Search, Trash2, UserRound, Wallet } from "lucide-react";
-import { demoCustomers, readDemoAdmin, type DemoAdminState, type DemoCustomer } from "../../lib/xoxo-demo";
-import { formatKzt } from "../../lib/formatters/money";
-import { BottomSheet } from "../shared/BottomSheet";
-
-const initial: DemoAdminState = { drinks: [], orders: [] };
-const guestsKey = "xoxo:command-center:guests:v1";
-
+import { useEffect, useState } from "react";
+type Guest = {
+  id: string;
+  name: string;
+  phone: string | null;
+  provisional: boolean;
+  reservations: number;
+  visits: number;
+};
+type GuestBooking = {
+  id: string;
+  startsAt: string;
+  status: string;
+  tableIds: string[];
+  guests: number;
+};
 export function GuestsScreen() {
-  const [data, setData] = useState(initial);
-  const [guests, setGuests] = useState<DemoCustomer[]>(demoCustomers);
-  const [query, setQuery] = useState("");
-  const [view, setView] = useState<"guests" | "orders">("guests");
-  const [editing, setEditing] = useState<DemoCustomer | null>(null);
-  const [draft, setDraft] = useState({ name: "", phone: "" });
-  useEffect(() => { setData(readDemoAdmin()); try { const saved = localStorage.getItem(guestsKey); if (saved) setGuests(JSON.parse(saved) as DemoCustomer[]); } catch { /* Use demo guests. */ } }, []);
-  const saveGuests = (next: DemoCustomer[]) => { setGuests(next); try { localStorage.setItem(guestsKey, JSON.stringify(next)); } catch { /* Session changes still work. */ } };
-  const clients = useMemo(() => guests.filter((client) => client.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()) || client.phone.includes(query)), [guests, query]);
-  const orders = useMemo(() => data.orders.filter((order) => { const client = guests.find((item) => item.id === order.customerId); return `${client?.name ?? ""} ${order.items}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()); }), [data.orders, guests, query]);
-  const openEdit = (guest: DemoCustomer) => { setEditing(guest); setDraft({ name: guest.name, phone: guest.phone }); };
-  const saveGuest = () => { if (!editing || !draft.name.trim() || !draft.phone.trim()) return; saveGuests(guests.map((guest) => guest.id === editing.id ? { ...guest, name: draft.name.trim(), phone: draft.phone.trim() } : guest)); setEditing(null); };
-  const deleteGuest = (guest: DemoCustomer) => { if (!window.confirm(`Удалить гостя «${guest.name}»?`)) return; saveGuests(guests.filter((item) => item.id !== guest.id)); };
-  return <div className="space-y-5 px-4 pb-32 pt-6">
-    <header><p className="text-xs font-bold uppercase tracking-[.18em] text-emerald-700">XOXO · гости</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Клиенты и чеки</h1><p className="mt-1 text-sm text-slate-500">История гостя и демо-заказов</p></header>
-    <section className="grid grid-cols-2 gap-2"><div className="rounded-3xl bg-[#12332b] p-4 text-white"><UserRound size={18} className="text-amber-300"/><p className="mt-4 text-2xl font-bold">{guests.length}</p><p className="text-xs text-white/65">гостей</p></div><div className="rounded-3xl bg-[#12332b] p-4 text-white"><ReceiptText size={18} className="text-amber-300"/><p className="mt-4 text-2xl font-bold">{data.orders.length}</p><p className="text-xs text-white/65">чеков</p></div></section>
-    <Link to="/" search={{ reservations: true }} className="flex min-h-16 items-center gap-3 rounded-3xl bg-white p-4 shadow-sm"><span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><CalendarDays size={20}/></span><span className="flex-1"><strong className="block">Брони и столы</strong><span className="text-xs text-slate-500">Открыть зал с реальными бронями</span></span><span aria-hidden>→</span></Link>
-    <div className="flex rounded-2xl bg-white p-1 shadow-sm"><button type="button" onClick={() => setView("guests")} className={`min-h-11 flex-1 rounded-xl text-sm font-bold ${view === "guests" ? "bg-[#12332b] text-white" : "text-slate-500"}`}>Гости</button><button type="button" onClick={() => setView("orders")} className={`min-h-11 flex-1 rounded-xl text-sm font-bold ${view === "orders" ? "bg-[#12332b] text-white" : "text-slate-500"}`}>Заказы</button></div>
-    <label className="flex h-12 items-center gap-2 rounded-2xl bg-white px-3 shadow-sm"><Search size={18} className="text-slate-400"/><input className="w-full bg-transparent text-sm outline-none" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск гостя или заказа"/></label>
-    {view === "guests" ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{clients.map((client) => { const clientOrders = data.orders.filter((order) => order.customerId === client.id); const cashback = clientOrders.reduce((sum, order) => sum + order.cashback, 0); return <article key={client.id} className="rounded-3xl bg-white p-4 shadow-sm"><div className="flex items-center gap-3"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 font-bold text-emerald-800">{client.name.slice(0,1)}</span><div className="min-w-0 flex-1"><h2 className="truncate font-bold">{client.name}</h2><p className="text-xs text-slate-500">{client.phone}</p></div><div className="flex gap-1"><button type="button" onClick={() => openEdit(client)} className="rounded-xl bg-slate-100 p-2 text-slate-600" aria-label={`Редактировать ${client.name}`}><Pencil size={15}/></button><button type="button" onClick={() => deleteGuest(client)} className="rounded-xl bg-rose-50 p-2 text-rose-700" aria-label={`Удалить ${client.name}`}><Trash2 size={15}/></button></div></div><div className="mt-4 flex justify-between border-t border-slate-100 pt-3 text-sm"><span>{clientOrders.length} заказа</span><span className="flex items-center gap-1 font-semibold text-emerald-700"><Wallet size={14}/> {formatKzt(cashback)}</span></div><div className="mt-3 space-y-1">{clientOrders.slice(0, 2).map((order) => <p key={order.id} className="truncate text-xs text-slate-500">{new Date(order.date).toLocaleDateString("ru-RU")} · {order.items}</p>)}</div></article>; })}</div> : <div className="space-y-2">{orders.map((order) => <article key={order.id} className="rounded-3xl bg-white p-4 shadow-sm"><div className="flex justify-between gap-3"><div><p className="font-bold">{guests.find((client) => client.id === order.customerId)?.name ?? "Гость"}</p><p className="mt-1 text-xs text-slate-500">{new Date(order.date).toLocaleDateString("ru-RU")} · {order.items}</p></div><div className="shrink-0 text-right"><p className="font-bold">{formatKzt(order.total)}</p>{order.cashback > 0 && <p className="mt-1 text-xs font-semibold text-emerald-700">+{formatKzt(order.cashback)} кэшбэк</p>}</div></div></article>)}</div>}
-    {editing && <BottomSheet eyebrow="Карточка гостя" title="Редактировать гостя" onClose={() => setEditing(null)}><div className="space-y-3 pb-2"><input className="field" value={draft.name} onChange={(event) => setDraft((value) => ({ ...value, name: event.target.value }))} placeholder="Имя"/><input className="field" value={draft.phone} onChange={(event) => setDraft((value) => ({ ...value, phone: event.target.value }))} placeholder="Телефон" inputMode="tel"/><button type="button" onClick={saveGuest} className="w-full rounded-2xl bg-[#12332b] py-4 font-semibold text-white">Сохранить изменения</button></div></BottomSheet>}
-  </div>;
+  const [guests, setGuests] = useState<Guest[]>([]),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(""),
+    [selected, setSelected] = useState<Guest | null>(null),
+    [bookings, setBookings] = useState<GuestBooking[]>([]),
+    [query, setQuery] = useState(""),
+    [reservationId, setReservationId] = useState(""),
+    [reason, setReason] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/staff/v1/guests", { cache: "no-store", signal: controller.signal })
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(body.error?.message ?? "Гости недоступны");
+        setGuests(body.guests);
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(e.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
+  async function open(guest: Guest) {
+    setSelected(guest);
+    setBookings([]);
+    setError("");
+    try {
+      const r = await fetch(`/api/staff/v1/guests/${guest.id}`, { cache: "no-store" });
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.error?.message ?? "История недоступна");
+      setBookings(body.reservations);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "История недоступна");
+    }
+  }
+  return (
+    <div className="mx-auto max-w-3xl px-4 pb-24 pt-6">
+      <p className="text-xs uppercase tracking-wide text-slate-500">Гости XOXO</p>
+      <h1 className="mt-2 text-2xl font-semibold">Гостевые аккаунты</h1>
+      <label className="mt-5 block text-sm">
+        Найти по имени или телефону
+        <input
+          className="mt-2 min-h-11 w-full rounded-xl border px-3"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </label>
+      {error && (
+        <p role="alert" className="mt-4 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+      {loading ? (
+        <p className="mt-5" role="status">
+          Загрузка…
+        </p>
+      ) : (
+        <div className="mt-5 space-y-2">
+          {guests
+            .filter((g) => `${g.name} ${g.phone ?? ""}`.toLowerCase().includes(query.toLowerCase()))
+            .map((g) => (
+              <button
+                key={g.id}
+                onClick={() => void open(g)}
+                className="min-h-16 w-full rounded-2xl bg-white p-4 text-left"
+              >
+                <span className="font-medium">{g.name}</span>
+                <span className="mt-1 block text-xs text-slate-500">
+                  {g.provisional ? "Телефон не подтверждён" : "WhatsApp identity подтверждена"} ·{" "}
+                  {g.reservations} броней · {g.visits} подтверждённых визитов
+                </span>
+              </button>
+            ))}
+          {!guests.length && <p className="text-sm text-slate-500">Аккаунтов пока нет</p>}
+        </div>
+      )}
+      {selected && (
+        <section className="mt-6 rounded-2xl bg-white p-5">
+          <h2 className="text-xl font-medium">{selected.name}</h2>
+          <p className="mt-2 text-sm">{selected.phone}</p>
+          <p className="mt-1 break-all text-xs text-slate-500">Guest ID: {selected.id}</p>
+          <div className="mt-4 space-y-3">
+            {bookings.map((b) => (
+              <div key={b.id} className="rounded-xl border p-3 text-sm">
+                <p>
+                  {new Intl.DateTimeFormat("ru-RU", {
+                    timeZone: "Asia/Almaty",
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }).format(new Date(b.startsAt))}{" "}
+                  · {b.status}
+                </p>
+                <p className="mt-1">
+                  {b.guests} гостей · {(b.tableIds ?? []).join(" + ")}
+                </p>
+                <p className="mt-1 break-all text-xs text-slate-500">{b.id}</p>
+              </div>
+            ))}
+          </div>
+          {!selected.provisional && (
+            <div className="mt-6 border-t pt-4">
+              <p className="text-sm font-medium">Привязать старую бронь · только менеджер</p>
+              <p className="mt-2 text-xs text-slate-500">
+                Нужна проверенная принадлежность старой записи этому гостю; номер должен совпасть с
+                verified identity. Другие verified аккаунты не объединяются.
+              </p>
+              <label className="mt-3 block text-sm">
+                Reservation ID
+                <input
+                  className="mt-1 min-h-11 w-full rounded-xl border px-3"
+                  value={reservationId}
+                  onChange={(e) => setReservationId(e.target.value)}
+                />
+              </label>
+              <label className="mt-3 block text-sm">
+                Основание проверки
+                <input
+                  className="mt-1 min-h-11 w-full rounded-xl border px-3"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                />
+              </label>
+              <button
+                className="mt-3 min-h-11 rounded-xl border px-4 text-sm"
+                disabled={reason.trim().length < 10}
+                onClick={async () => {
+                  try {
+                    const r = await fetch(`/api/staff/v1/guests/${selected.id}/link-reservation`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ reservationId, reason: reason.trim() }),
+                    });
+                    const body = await r.json();
+                    if (!r.ok) throw new Error(body.error?.message ?? "Привязка недоступна");
+                    setReason("");
+                    setReservationId("");
+                    await open(selected);
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "Ошибка привязки");
+                  }
+                }}
+              >
+                Привязать с записью в аудит
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
 }

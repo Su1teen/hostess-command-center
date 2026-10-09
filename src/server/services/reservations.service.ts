@@ -55,11 +55,13 @@ export async function getTableAvailability(
   );
   const byTable = new Map<string, TableAvailabilityEntry>();
   for (const reservation of overlapping) {
-    if (!reservation.tableId) continue;
-    const status: TableOccupancy = reservation.status === "arrived" ? "seated" : "booked";
-    const existing = byTable.get(reservation.tableId);
-    if (!existing || (existing.status === "booked" && status === "seated")) {
-      byTable.set(reservation.tableId, { tableId: reservation.tableId, status, reservation });
+    if (!reservation.tableIds.length) continue;
+    for (const tableId of reservation.tableIds) {
+      const status: TableOccupancy = reservation.status === "arrived" ? "seated" : "booked";
+      const existing = byTable.get(tableId);
+      if (!existing || (existing.status === "booked" && status === "seated")) {
+        byTable.set(tableId, { tableId, status, reservation });
+      }
     }
   }
   return {
@@ -83,6 +85,8 @@ export async function createReservation(
       code: "invalid",
       message: "Время окончания должно быть позже начала",
     };
+  if (input.guests > table.seats)
+    return { ok: false, code: "invalid", message: "Превышена вместимость стола" };
   try {
     const reservation = await reservations.insert(
       { ...input, tableLabel: table.label },
@@ -100,6 +104,12 @@ export async function createReservation(
         message: `Стол ${table.label} уже занят: ${error.conflicting.guestName}`,
       };
     }
+    if ((error as { code?: string })?.code === "23P01")
+      return {
+        ok: false,
+        code: "conflict",
+        message: "Стол занят или временно удерживается гостем",
+      };
     throw error;
   }
 }

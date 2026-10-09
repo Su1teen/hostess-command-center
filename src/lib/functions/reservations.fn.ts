@@ -1,3 +1,4 @@
+import { requireStaff } from "../../server/guest/auth";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -24,10 +25,11 @@ const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const getReservationsBoard = createServerFn({ method: "GET" })
   .inputValidator(z.object({ date: dateKeySchema.optional() }).default({}))
   .handler(async ({ data }) => {
+    await requireStaff();
     try {
       return await getBoard(data.date);
     } catch (error) {
-      console.error("[reservations] getReservationsBoard failed", error);
+      console.error("[command-center] operation failed");
       throw new Error("База данных недоступна");
     }
   });
@@ -35,10 +37,11 @@ export const getReservationsBoard = createServerFn({ method: "GET" })
 export const getTableAvailability = createServerFn({ method: "GET" })
   .inputValidator(z.object({ startsAt: z.string().datetime(), endsAt: z.string().datetime() }))
   .handler(async ({ data }) => {
+    await requireStaff();
     try {
       return await getAvailability(data.startsAt, data.endsAt);
     } catch (error) {
-      console.error("[reservations] getTableAvailability failed", error);
+      console.error("[command-center] operation failed");
       throw new Error("База данных недоступна");
     }
   });
@@ -60,10 +63,11 @@ export const createReservation = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
+    await requireStaff(true, true);
     try {
       return await create(data, data.preorders as ReservationPreorder[]);
     } catch (error) {
-      console.error("[reservations] createReservation failed", error);
+      console.error("[command-center] operation failed");
       throw new Error("База данных недоступна");
     }
   });
@@ -71,10 +75,11 @@ export const createReservation = createServerFn({ method: "POST" })
 export const setReservationStatus = createServerFn({ method: "POST" })
   .inputValidator(z.object({ id: z.string().uuid(), status: statusSchema }))
   .handler(async ({ data }) => {
+    await requireStaff(true);
     try {
       return await setStatus(data.id, data.status as ReservationStatus);
     } catch (error) {
-      console.error("[reservations] setReservationStatus failed", error);
+      console.error("[command-center] operation failed");
       throw new Error("База данных недоступна");
     }
   });
@@ -82,10 +87,11 @@ export const setReservationStatus = createServerFn({ method: "POST" })
 export const setDepositStatus = createServerFn({ method: "POST" })
   .inputValidator(z.object({ id: z.string().uuid(), status: depositSchema }))
   .handler(async ({ data }) => {
+    await requireStaff(true, true);
     try {
       return await setDeposit(data.id, data.status as DepositStatus);
     } catch (error) {
-      console.error("[reservations] setDepositStatus failed", error);
+      console.error("[command-center] operation failed");
       throw new Error("База данных недоступна");
     }
   });

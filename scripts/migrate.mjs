@@ -39,6 +39,10 @@ try {
 
     for (const file of files) {
       if (appliedNames.has(file)) continue;
+      if (file >= "0003_guest_booking.sql" && process.env.ALLOW_GUEST_BOOKING_MIGRATION !== "yes") {
+        console.warn("[migrate] guest booking migration requires explicit opt-in; not applied");
+        continue;
+      }
       const sql = await readFile(join(migrationsDir, file), "utf8");
       await client.query("BEGIN");
       try {

@@ -35,7 +35,7 @@ export function TableSheet({
   const status = entry?.status ?? "free";
   const current = entry?.reservation ?? null;
   const upcoming = dayReservations.filter(
-    (item) => item.tableId === tableId && item.id !== current?.id,
+    (item) => item.tableIds.includes(tableId) && item.id !== current?.id,
   );
   return (
     <BottomSheet

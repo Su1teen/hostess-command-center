@@ -1,3 +1,4 @@
+import { actor, requireStaff, transaction } from "../guest/auth";
 import type {
   DepositStatus,
   Reservation,
@@ -10,6 +11,7 @@ import { pool, query } from "../db/pool";
 type ReservationRow = {
   id: string;
   external_id: string | null;
+  table_ids: string[] | null;
   table_id: string | null;
   table_label: string | null;
   guest_name: string;
@@ -53,6 +55,7 @@ function mapReservation(row: ReservationRow, preorders: ReservationPreorder[] = 
   return {
     id: row.id,
     externalId: row.external_id,
+    tableIds: row.table_ids ?? (row.table_id ? [row.table_id] : []),
     tableId: row.table_id,
     tableLabel: row.table_label,
     guestName: row.guest_name,
@@ -147,6 +150,8 @@ export async function insert(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const staff = await requireStaff(true);
+    await actor(client, `staff:${staff.staff_id}`);
     // Serialize concurrent inserts for the same table so the overlap check cannot race.
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`cc-table:${input.tableId}`]);
     const conflict = await client.query<ReservationRow>(
@@ -163,10 +168,14 @@ export async function insert(
       await client.query("ROLLBACK");
       throw new ReservationConflictError(mapReservation(conflict.rows[0]));
     }
+    const guest = await client.query(
+      "INSERT INTO hostess_guests(name,phone) VALUES($1,$2) RETURNING id",
+      [input.guestName, input.phone],
+    );
     const reservation = await client.query<ReservationRow>(
       `INSERT INTO command_center_reservations
-        (table_id, table_label, guest_name, phone, guests, starts_at, ends_at, source, deposit_amount, deposit_status, comment)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        (table_id, table_label, guest_name, phone, guests, starts_at, ends_at, source, deposit_amount, deposit_status, comment, guest_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [
         input.tableId,
@@ -180,6 +189,7 @@ export async function insert(
         input.depositAmount,
         input.depositStatus,
         input.comment ?? null,
+        guest.rows[0].id,
       ],
     );
     const row = reservation.rows[0];
@@ -217,10 +227,14 @@ export async function updateStatus(
   id: string,
   status: ReservationStatus,
 ): Promise<Reservation | null> {
-  const result = await query<ReservationRow>(
-    "UPDATE command_center_reservations SET status = $2, updated_at = now() WHERE id = $1 RETURNING *",
-    [id, status],
-  );
+  const staff = await requireStaff(true, false);
+  const result = await transaction(async (client) => {
+    await actor(client, `staff:${staff.staff_id}`);
+    return client.query<ReservationRow>(
+      "UPDATE command_center_reservations SET status = $2, updated_at = now() WHERE id = $1 RETURNING *",
+      [id, status],
+    );
+  });
   return result.rows[0] ? getById(id) : null;
 }
 
@@ -228,9 +242,13 @@ export async function updateDepositStatus(
   id: string,
   status: DepositStatus,
 ): Promise<Reservation | null> {
-  const result = await query<ReservationRow>(
-    "UPDATE command_center_reservations SET deposit_status = $2, updated_at = now() WHERE id = $1 RETURNING *",
-    [id, status],
-  );
+  const staff = await requireStaff(true, true);
+  const result = await transaction(async (client) => {
+    await actor(client, `staff:${staff.staff_id}`);
+    return client.query<ReservationRow>(
+      "UPDATE command_center_reservations SET deposit_status = $2, updated_at = now() WHERE id = $1 RETURNING *",
+      [id, status],
+    );
+  });
   return result.rows[0] ? getById(id) : null;
 }
