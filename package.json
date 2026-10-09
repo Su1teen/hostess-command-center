@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "db:migrate": "node scripts/migrate.mjs",
-    "start": "node scripts/migrate.mjs && node scripts/start.mjs"
+    "start": "node scripts/start.mjs",
+    "booking:preflight": "node scripts/booking-preflight.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

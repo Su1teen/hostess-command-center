@@ -61,7 +61,6 @@ try {
 } catch (error) {
   const errorCode =
     error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
-  const errorMessage = error instanceof Error ? error.message : String(error);
   const unavailableCodes = new Set([
     "ECONNREFUSED",
     "ENOTFOUND",
@@ -76,12 +75,10 @@ try {
   ]);
 
   if (unavailableCodes.has(errorCode)) {
-    console.warn(
-      `[migrate] database unavailable (${errorCode}): ${errorMessage}; continuing without migrations.`,
-    );
-    process.exitCode = 0;
+    console.warn(`[migrate] database unavailable (${errorCode}); migration not applied.`);
+    process.exitCode = 1;
   } else {
-    console.error(`[migrate] migration failed (${errorCode}): ${errorMessage}`);
+    console.error(`[migrate] migration failed (${errorCode})`);
     process.exitCode = 1;
   }
 } finally {
