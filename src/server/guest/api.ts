@@ -138,7 +138,7 @@ async function createResourceHold(
   const hold = (
     await client.query(
       `INSERT INTO hostess_holds(guest_id,table_ids,starts_at,ends_at,guests)
-       VALUES($1,$2,$3,$4,$5) RETURNING id,expires_at AS "expiresAt"`,
+       VALUES($1,$2,$3,$4,$5) RETURNING *, expires_at AS "expiresAt"`,
       [guestId, [resource.code], input.startsAt, input.endsAt, input.guests],
     )
   ).rows[0];
