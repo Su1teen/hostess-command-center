@@ -57,11 +57,17 @@ export const selectionSchema = z.object({
   guests: z.number().int().min(1).max(20),
   tableIds: z.array(z.string()).min(1).max(4),
 });
-export function validateSelection(
-  input: z.infer<typeof selectionSchema>,
-  tables: { id: string; seats: number }[],
-  allowPast = false,
-) {
+export const inventorySelectionSchema = z
+  .object({
+    startsAt: z.string().datetime(),
+    endsAt: z.string().datetime(),
+    guests: z.number().int().min(1).max(20),
+    resourceId: z.string().uuid().optional(),
+    zoneId: z.string().uuid().optional(),
+  })
+  .strict();
+export const bookingSelectionSchema = z.union([selectionSchema, inventorySelectionSchema]);
+export function validateBookingWindow(input: { startsAt: string; endsAt: string }, allowPast = false) {
   intervalSchema.parse(input);
   if (
     (!allowPast && Date.parse(input.startsAt) < Date.now()) ||
@@ -83,6 +89,14 @@ export function validateSelection(
   const serviceMinute = start < 17 * 60 ? start + 1440 : start;
   if (serviceMinute < 17 * 60 || serviceMinute + duration > 28 * 60)
     throw new ApiError(422, "CLOSED", "Бронирование доступно с 17:00 до 04:00");
+}
+
+export function validateSelection(
+  input: z.infer<typeof selectionSchema>,
+  tables: { id: string; seats: number }[],
+  allowPast = false,
+) {
+  validateBookingWindow(input, allowPast);
   const ids = [...new Set(input.tableIds)];
   if (ids.length !== input.tableIds.length || ids.some((id) => !tables.some((t) => t.id === id)))
     throw new ApiError(422, "INVALID_TABLE", "Проверьте выбранные столы");

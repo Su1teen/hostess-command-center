@@ -18,6 +18,9 @@ export interface Reservation {
   tableIds: string[];
   tableId: string | null;
   tableLabel: string | null;
+  resourceId?: string | null;
+  resourceName?: string | null;
+  zoneName?: string | null;
   guestName: string;
   phone: string;
   guests: number;
@@ -60,6 +63,40 @@ export interface TableAvailability {
   startsAt: string;
   endsAt: string;
   tables: TableAvailabilityEntry[];
+  resources: VenueResourceAvailability[];
+  zones: VenueZoneAvailability[];
+}
+
+export interface VenueZoneAvailability {
+  id: string;
+  code: string;
+  name: string;
+  type: "main_hall" | "secondary_hall" | "vip" | "shared_hall" | "bar";
+  description: string | null;
+  displayOrder: number;
+  resources: VenueResourceAvailability[];
+}
+
+export interface VenueResourceAvailability {
+  id: string;
+  zoneId: string;
+  zoneCode: string;
+  zoneName: string;
+  code: string;
+  name: string;
+  resourceType: "table" | "private_room" | "bar_seating";
+  capacity: number | null;
+  isReservable: boolean;
+  status: "free" | "booked" | "unavailable";
+  available: boolean;
+  layout: {
+    x: number | null;
+    y: number | null;
+    width: number | null;
+    height: number | null;
+    shape: string | null;
+    rotation: number | null;
+  } | null;
 }
 
 export type CreateReservationResult =

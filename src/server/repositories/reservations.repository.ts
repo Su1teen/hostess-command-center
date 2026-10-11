@@ -14,6 +14,9 @@ type ReservationRow = {
   table_ids: string[] | null;
   table_id: string | null;
   table_label: string | null;
+  resource_id?: string | null;
+  resource_name?: string | null;
+  zone_name?: string | null;
   guest_name: string;
   phone: string;
   guests: number;
@@ -58,6 +61,9 @@ function mapReservation(row: ReservationRow, preorders: ReservationPreorder[] = 
     tableIds: row.table_ids ?? (row.table_id ? [row.table_id] : []),
     tableId: row.table_id,
     tableLabel: row.table_label,
+    resourceId: row.resource_id ?? null,
+    resourceName: row.resource_name ?? null,
+    zoneName: row.zone_name ?? null,
     guestName: row.guest_name,
     phone: row.phone,
     guests: Number(row.guests),
@@ -92,7 +98,11 @@ async function attachPreorders(rows: ReservationRow[]): Promise<Reservation[]> {
 
 export async function listByRange(start: Date, end: Date): Promise<Reservation[]> {
   const result = await query<ReservationRow>(
-    "SELECT * FROM command_center_reservations WHERE starts_at >= $1 AND starts_at < $2 ORDER BY starts_at ASC",
+    `SELECT r.*,
+       (SELECT vr.id FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id WHERE rr.reservation_id=r.id) AS resource_id,
+       (SELECT vr.name FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id WHERE rr.reservation_id=r.id) AS resource_name,
+       (SELECT z.name FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id JOIN venue_zones z ON z.id=vr.zone_id WHERE rr.reservation_id=r.id) AS zone_name
+     FROM command_center_reservations r WHERE r.starts_at >= $1 AND r.starts_at < $2 ORDER BY r.starts_at ASC`,
     [start, end],
   );
   return attachPreorders(result.rows);
@@ -104,11 +114,15 @@ export async function listByRange(start: Date, end: Date): Promise<Reservation[]
  */
 export async function listActiveOverlapping(start: Date, end: Date): Promise<Reservation[]> {
   const result = await query<ReservationRow>(
-    `SELECT * FROM command_center_reservations
-     WHERE status NOT IN ('cancelled', 'no_show')
-       AND starts_at < $2
-       AND COALESCE(ends_at, starts_at + interval '2 hours') > $1
-     ORDER BY starts_at ASC`,
+    `SELECT r.*,
+       (SELECT vr.id FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id WHERE rr.reservation_id=r.id) AS resource_id,
+       (SELECT vr.name FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id WHERE rr.reservation_id=r.id) AS resource_name,
+       (SELECT z.name FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id JOIN venue_zones z ON z.id=vr.zone_id WHERE rr.reservation_id=r.id) AS zone_name
+     FROM command_center_reservations r
+     WHERE r.status NOT IN ('cancelled', 'no_show')
+       AND r.starts_at < $2
+       AND COALESCE(r.ends_at, r.starts_at + interval '2 hours') > $1
+     ORDER BY r.starts_at ASC`,
     [start, end],
   );
   return attachPreorders(result.rows);
@@ -123,7 +137,11 @@ export class ReservationConflictError extends Error {
 
 export async function getById(id: string): Promise<Reservation | null> {
   const result = await query<ReservationRow>(
-    "SELECT * FROM command_center_reservations WHERE id = $1",
+    `SELECT r.*,
+       (SELECT vr.id FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id WHERE rr.reservation_id=r.id) AS resource_id,
+       (SELECT vr.name FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id WHERE rr.reservation_id=r.id) AS resource_name,
+       (SELECT z.name FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id JOIN venue_zones z ON z.id=vr.zone_id WHERE rr.reservation_id=r.id) AS zone_name
+     FROM command_center_reservations r WHERE r.id = $1`,
     [id],
   );
   return result.rows[0] ? ((await attachPreorders(result.rows))[0] ?? null) : null;
@@ -132,6 +150,7 @@ export async function getById(id: string): Promise<Reservation | null> {
 export interface ReservationInsert {
   tableId: string;
   tableLabel: string;
+  resourceId?: string;
   guestName: string;
   phone: string;
   guests: number;
@@ -194,6 +213,12 @@ export async function insert(
     );
     const row = reservation.rows[0];
     if (!row) throw new Error("Не удалось создать бронь");
+    if (input.resourceId) {
+      await client.query(
+        "INSERT INTO command_center_reservation_resources(reservation_id,resource_id) VALUES($1,$2)",
+        [row.id, input.resourceId],
+      );
+    }
     for (const preorder of preorders) {
       await client.query(
         `INSERT INTO command_center_reservation_preorders
@@ -211,7 +236,7 @@ export async function insert(
       );
     }
     await client.query("COMMIT");
-    return mapReservation(
+    return (await getById(row.id)) ?? mapReservation(
       row,
       preorders.map((preorder, index) => ({ ...preorder, id: `new-${index}` })),
     );

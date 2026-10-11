@@ -37,6 +37,7 @@ interface Preorder {
 
 export interface CreateReservationValues extends FormValues {
   tableId: string;
+  resourceId?: string;
   startsAt: string;
   endsAt: string;
   preorders: Preorder[];
@@ -55,6 +56,7 @@ export function CreateReservationSheet({
   initialDate,
   initialTime,
   initialTableId,
+  initialResourceId,
   onClose,
   onSubmit,
   pending,
@@ -63,6 +65,7 @@ export function CreateReservationSheet({
   initialDate: string;
   initialTime: string;
   initialTableId?: string | null;
+  initialResourceId?: string | null;
   onClose: () => void;
   onSubmit: (values: CreateReservationValues) => void;
   pending?: boolean;
@@ -72,6 +75,7 @@ export function CreateReservationSheet({
   const [time, setTime] = useState(initialTime);
   const [duration, setDuration] = useState(DEFAULT_RESERVATION_MINUTES);
   const [tableId, setTableId] = useState<string | null>(initialTableId ?? null);
+  const [resourceId, setResourceId] = useState<string | null>(initialResourceId ?? null);
   const [tableError, setTableError] = useState(false);
   const [preorders, setPreorders] = useState<Preorder[]>([]);
 
@@ -84,22 +88,27 @@ export function CreateReservationSheet({
     return map;
   }, [availability.data]);
 
-  const selectedStatus = tableId ? (statusOf.get(tableId) ?? "free") : null;
-  const selectedBlocked = selectedStatus !== null && selectedStatus !== "free";
-
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<FormValues>({
     defaultValues: { guests: 2, source: "manual", depositAmount: 0, depositStatus: "none" },
   });
 
+  const selectedStatus = tableId ? (statusOf.get(tableId) ?? "free") : null;
+  const guestCount = Number(watch("guests") ?? 2);
+  const selectedResource = availability.data?.resources.find((item) => item.id === resourceId);
+  const selectedBlocked = resourceId
+    ? !selectedResource?.available || (selectedResource.capacity ?? 0) < guestCount
+    : selectedStatus !== null && selectedStatus !== "free";
+
   return (
     <BottomSheet eyebrow="Новая бронь" title="Добавить гостя" onClose={onClose}>
       <form
         onSubmit={handleSubmit((values) => {
-          if (!tableId || selectedBlocked) {
+          if ((!tableId && !resourceId) || selectedBlocked) {
             setTableError(true);
             return;
           }
@@ -107,7 +116,8 @@ export function CreateReservationSheet({
             ...values,
             guests: Number(values.guests),
             depositAmount: Number(values.depositAmount),
-            tableId,
+            tableId: tableId ?? selectedResource?.code ?? "",
+            resourceId: resourceId ?? undefined,
             startsAt,
             endsAt,
             preorders,
@@ -150,11 +160,45 @@ export function CreateReservationSheet({
 
         <section>
           <div className="mb-2 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Стол</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Подтверждённые ресурсы</p>
             {availability.isFetching && (
               <span className="text-[11px] text-slate-400">Обновляем…</span>
             )}
           </div>
+          {availability.data?.resources.length ? (
+            <div className="mb-3 grid grid-cols-1 gap-2 min-[390px]:grid-cols-2">
+              {availability.data.resources.map((item) => {
+                const selected = resourceId === item.id;
+                const status = selected ? "selected" : item.available ? "free" : "booked";
+                const disabled = !item.available && !selected;
+                return (
+                  <button
+                    type="button"
+                    key={item.id}
+                    disabled={disabled}
+                    onClick={() => {
+                      setResourceId(item.id);
+                      setTableId(null);
+                      setTableError(false);
+                    }}
+                    className={`flex min-h-14 flex-col items-start rounded-2xl px-3 py-2 text-sm font-semibold transition-colors ${TABLE_STYLE[status]} disabled:cursor-not-allowed`}
+                  >
+                    {item.name}
+                    <span className="mt-0.5 text-[10px] font-medium opacity-70">
+                      {item.capacity} мест · {item.available ? "Свободно" : "Занято"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="mb-3 rounded-xl bg-slate-100 p-3 text-xs text-slate-500">
+              Подтверждённых мест нет. Залы появятся после сверки физической схемы.
+            </p>
+          )}
+          <p className="mb-2 text-[11px] font-medium text-slate-500">
+            Старые ID · вместимость и физическое соответствие требуют сверки
+          </p>
           <div className="grid grid-cols-4 gap-2">
             {HALL_TABLES.map((table) => {
               const status = statusOf.get(table.id) ?? "free";
@@ -167,6 +211,7 @@ export function CreateReservationSheet({
                   disabled={disabled && !selected}
                   onClick={() => {
                     setTableId(table.id);
+                    setResourceId(null);
                     setTableError(false);
                   }}
                   className={`flex flex-col items-center rounded-2xl py-2.5 text-sm font-semibold transition-colors ${
@@ -188,7 +233,7 @@ export function CreateReservationSheet({
               Этот стол занят на выбранное время — выберите другое время или стол
             </p>
           )}
-          {tableError && !tableId && <p className="mt-2 text-xs text-rose-600">Выберите стол</p>}
+          {tableError && !tableId && !resourceId && <p className="mt-2 text-xs text-rose-600">Выберите место</p>}
         </section>
 
         <section className="space-y-2">

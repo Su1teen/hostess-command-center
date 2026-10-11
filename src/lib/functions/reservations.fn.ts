@@ -49,7 +49,8 @@ export const getTableAvailability = createServerFn({ method: "GET" })
 export const createReservation = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
-      tableId: z.string().min(1),
+      tableId: z.string().min(1).optional(),
+      resourceId: z.string().uuid().optional(),
       guestName: z.string().min(1),
       phone: z.string().min(5),
       guests: z.number().int().min(1).max(50),
@@ -60,7 +61,7 @@ export const createReservation = createServerFn({ method: "POST" })
       depositStatus: depositSchema.default("none"),
       comment: z.string().optional(),
       preorders: z.array(preorderSchema).default([]),
-    }),
+    }).refine((value) => Boolean(value.tableId) || Boolean(value.resourceId), "Выберите стол или ресурс"),
   )
   .handler(async ({ data }) => {
     await requireStaff(true, true);

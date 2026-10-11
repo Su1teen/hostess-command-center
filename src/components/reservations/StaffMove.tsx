@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { HALL_TABLES } from "../../lib/hall/layout";
-import { RESERVATIONS_KEY } from "../../lib/queries/reservations";
+import { RESERVATIONS_KEY, tableAvailabilityQuery } from "../../lib/queries/reservations";
 import type { Reservation } from "../../lib/types/reservations";
+
 export function StaffMove({
   reservation,
   onMoved,
@@ -11,27 +12,50 @@ export function StaffMove({
   onMoved?: (r: Reservation) => void;
 }) {
   const client = useQueryClient();
-  const [table, setTable] = useState(reservation.tableId ?? "A1"),
+  const endsAt =
+    reservation.endsAt ?? new Date(Date.parse(reservation.startsAt) + 2 * 3600_000).toISOString();
+  const availability = useQuery(tableAvailabilityQuery(reservation.startsAt, endsAt));
+  const [choice, setChoice] = useState(
+      reservation.resourceId
+        ? `resource:${reservation.resourceId}`
+        : `table:${reservation.tableId ?? "A1"}`,
+    ),
     [reason, setReason] = useState(""),
     [error, setError] = useState(""),
     [pending, setPending] = useState(false);
+  const resourceId = choice.startsWith("resource:") ? choice.slice("resource:".length) : null;
+  const tableId = choice.startsWith("table:") ? choice.slice("table:".length) : null;
+
   return (
     <div className="mt-5 rounded-2xl bg-white p-4">
       <p className="text-xs font-semibold uppercase text-slate-500">
         Пересадить гостя · проверка пересечений
       </p>
       <label className="mt-3 block text-sm">
-        Новый стол
+        Новое место
         <select
           className="mt-2 min-h-11 w-full rounded-xl border px-3"
-          value={table}
-          onChange={(e) => setTable(e.target.value)}
+          value={choice}
+          onChange={(event) => setChoice(event.target.value)}
         >
-          {HALL_TABLES.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.label} · {t.seats} мест
-            </option>
-          ))}
+          <optgroup label="Старые ID · требуют сверки">
+            {HALL_TABLES.map((table) => (
+              <option key={table.id} value={`table:${table.id}`}>
+                {table.label}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Подтверждённые ресурсы">
+            {availability.data?.resources.map((resource) => (
+              <option
+                key={resource.id}
+                value={`resource:${resource.id}`}
+                disabled={!resource.available && resource.id !== reservation.resourceId}
+              >
+                {resource.zoneName} · {resource.name} · {resource.capacity} мест
+              </option>
+            ))}
+          </optgroup>
         </select>
       </label>
       <label className="mt-3 block text-sm">
@@ -39,7 +63,7 @@ export function StaffMove({
         <input
           className="mt-2 min-h-11 w-full rounded-xl border px-3"
           value={reason}
-          onChange={(e) => setReason(e.target.value)}
+          onChange={(event) => setReason(event.target.value)}
           maxLength={300}
         />
       </label>
@@ -55,13 +79,16 @@ export function StaffMove({
           setPending(true);
           setError("");
           try {
-            const r = await fetch(`/api/staff/v1/reservations/${reservation.id}/move`, {
+            const response = await fetch(`/api/staff/v1/reservations/${reservation.id}/move`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ tableIds: [table], reason: reason.trim() }),
+              body: JSON.stringify({
+                ...(resourceId ? { resourceId } : { tableIds: [tableId] }),
+                reason: reason.trim(),
+              }),
             });
-            const data = await r.json();
-            if (!r.ok) throw new Error(data.error?.message ?? "Пересадка недоступна");
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error?.message ?? "Пересадка недоступна");
             await client.invalidateQueries({ queryKey: RESERVATIONS_KEY });
             onMoved?.(data.reservation);
             setError("");
@@ -72,7 +99,7 @@ export function StaffMove({
           }
         }}
       >
-        Сохранить новый стол
+        Сохранить новое место
       </button>
     </div>
   );

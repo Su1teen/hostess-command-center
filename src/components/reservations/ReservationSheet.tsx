@@ -58,7 +58,11 @@ export function ReservationSheet({
               {reservation.endsAt && ` – ${formatTimeAlmaty(reservation.endsAt)}`}
             </p>
             <p className="text-sm text-slate-500">
-              {reservation.tableLabel ? `Стол ${reservation.tableLabel} · ` : ""}
+              {reservation.resourceName
+                ? `${reservation.resourceName} · `
+                : reservation.tableLabel
+                  ? `Стол ${reservation.tableLabel} · `
+                  : ""}
               {reservation.guests} гостей · {RESERVATION_SOURCE_LABEL[reservation.source]}
             </p>
           </div>

@@ -2,6 +2,7 @@ import { getById } from "../repositories/reservations.repository";
 import { z } from "zod";
 import { HALL_TABLES, TV_SCREENS, FLOOR_WIDTH, FLOOR_HEIGHT } from "../../lib/hall/layout";
 import { pool } from "../db/pool";
+import { listVenueAvailability, selectReservableResource } from "./inventory";
 import {
   actor,
   checkStaffOrigin,
@@ -16,6 +17,9 @@ import {
   cookie,
   hash,
   intervalSchema,
+  bookingSelectionSchema,
+  inventorySelectionSchema,
+  validateBookingWindow,
   randomToken,
   readCookie,
   selectionSchema,
@@ -95,7 +99,12 @@ async function guestFor(request: Request, integration: boolean, input?: { guestI
     );
   return found.guest_id;
 }
-async function availability(startsAt: string, endsAt: string, guestId: string | null) {
+async function availability(
+  startsAt: string,
+  endsAt: string,
+  guestId: string | null,
+  guests: number | null = null,
+) {
   intervalSchema.parse({ startsAt, endsAt });
   const busy = await pool.query(
     `SELECT unnest(COALESCE(table_ids,ARRAY[table_id])) AS id
@@ -106,6 +115,7 @@ async function availability(startsAt: string, endsAt: string, guestId: string | 
     [startsAt, endsAt, guestId],
   );
   const occupied = new Set(busy.rows.map((r) => r.id));
+  const inventory = await listVenueAvailability(pool, startsAt, endsAt, guests, guestId);
   return {
     startsAt,
     endsAt,
@@ -114,6 +124,36 @@ async function availability(startsAt: string, endsAt: string, guestId: string | 
     height: FLOOR_HEIGHT,
     screens: TV_SCREENS,
     tables: HALL_TABLES.map((t) => ({ ...t, available: !occupied.has(t.id) })),
+    zones: inventory.zones,
+    resources: inventory.resources,
+  };
+}
+async function createResourceHold(
+  client: import("pg").PoolClient,
+  guestId: string,
+  input: z.infer<typeof inventorySelectionSchema>,
+) {
+  validateBookingWindow(input);
+  const resource = await selectReservableResource(client, input);
+  const hold = (
+    await client.query(
+      `INSERT INTO hostess_holds(guest_id,table_ids,starts_at,ends_at,guests)
+       VALUES($1,$2,$3,$4,$5) RETURNING id,expires_at AS "expiresAt"`,
+      [guestId, [resource.code], input.startsAt, input.endsAt, input.guests],
+    )
+  ).rows[0];
+  await client.query("INSERT INTO hostess_hold_resources(hold_id,resource_id) VALUES($1,$2)", [
+    hold.id,
+    resource.id,
+  ]);
+  return {
+    ...hold,
+    resourceId: resource.id,
+    resourceCode: resource.code,
+    resourceName: resource.name,
+    zoneId: resource.zone_id,
+    zoneName: resource.zone_name,
+    capacity: resource.capacity,
   };
 }
 async function reservationList(
@@ -125,6 +165,9 @@ async function reservationList(
   const result = await pool.query(
     `SELECT r.id,r.guest_name AS "guestName",r.guests,r.starts_at AS "startsAt",
     r.ends_at AS "endsAt",r.created_at AS "createdAt",to_char(r.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "paginationTime",r.status,r.table_id AS "tableId",COALESCE(r.table_ids,ARRAY[r.table_id]) AS "tableIds",
+    (SELECT vr.id FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id WHERE rr.reservation_id=r.id) AS "resourceId",
+    (SELECT vr.name FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id WHERE rr.reservation_id=r.id) AS "resourceName",
+    (SELECT z.name FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id JOIN venue_zones z ON z.id=vr.zone_id WHERE rr.reservation_id=r.id) AS "zoneName",
     r.deposit_status AS "depositStatus",r.deposit_amount AS "depositAmount",r.iiko_sync_status AS "iikoSyncStatus",
     COALESCE((SELECT jsonb_agg(jsonb_build_object('productId',p.product_id,'productName',p.product_name,
       'quantity',p.quantity,'unitPrice',p.unit_price,'total',p.total,'status',p.preorder_status,'roundId',p.round_id))
@@ -324,12 +367,35 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
         startsAt: url.searchParams.get("startsAt"),
         endsAt: url.searchParams.get("endsAt"),
       });
+      const guestsParam = url.searchParams.get("guests");
+      const guests = guestsParam === null ? null : z.coerce.number().int().min(1).max(20).parse(guestsParam);
+      const result = await availability(
+        input.startsAt,
+        input.endsAt,
+        (await session(request))?.guest_id ?? null,
+        guests,
+      );
+      const requestedZone = url.searchParams.get("zoneId");
+      const requestedResource = url.searchParams.get("resourceId");
+      if (requestedZone) uuid.parse(requestedZone);
+      if (requestedResource) uuid.parse(requestedResource);
+      if (requestedZone || requestedResource) {
+        result.resources = result.resources.filter((r) =>
+          (requestedZone ? r.zoneId === requestedZone : true) &&
+          (requestedResource ? r.id === requestedResource : true),
+        );
+        result.zones = result.zones
+          .map((zone) => ({
+            ...zone,
+            resources: zone.resources.filter((r) => !requestedResource || r.id === requestedResource),
+          }))
+          .filter((zone) =>
+            (!requestedZone || zone.id === requestedZone) &&
+            (!requestedResource || zone.resources.length > 0),
+          );
+      }
       return json(
-        await availability(
-          input.startsAt,
-          input.endsAt,
-          (await session(request))?.guest_id ?? null,
-        ),
+        result,
       );
     }
     const guestId = await guestFor(
@@ -403,21 +469,74 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
       });
     }
     if (path === "/holds" && method === "POST") {
-      const input = selectionSchema.extend({ guestId: uuid.optional() }).strict().parse(data);
-      validateSelection(input, HALL_TABLES);
+      const input = z
+        .union([
+          selectionSchema.extend({ guestId: uuid.optional(), idempotencyKey: z.string().min(16).max(128).optional() }).strict(),
+          inventorySelectionSchema.extend({ guestId: uuid.optional(), idempotencyKey: z.string().min(16).max(128).optional() }).strict(),
+        ])
+        .parse(data);
+      if ("tableIds" in input) validateSelection(input, HALL_TABLES);
+      else validateBookingWindow(input);
       const hold = await transaction(async (client) => {
+        const requestHash = hash(
+          JSON.stringify({
+            startsAt: input.startsAt,
+            endsAt: input.endsAt,
+            guests: input.guests,
+            ...( "tableIds" in input
+              ? { tableIds: input.tableIds }
+              : { resourceId: input.resourceId ?? null, zoneId: input.zoneId ?? null }),
+          }),
+        );
+        if (input.idempotencyKey) {
+          await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+            `hold:${guestId}:${input.idempotencyKey}`,
+          ]);
+          const previous = (
+            await client.query<{ request_hash: string; hold_id: string }>(
+              "SELECT request_hash,hold_id FROM hostess_hold_idempotency WHERE guest_id=$1 AND idempotency_key=$2 FOR UPDATE",
+              [guestId, input.idempotencyKey],
+            )
+          ).rows[0];
+          if (previous) {
+            if (previous.request_hash !== requestHash)
+              throw new ApiError(409, "IDEMPOTENCY_MISMATCH", "Ключ уже использован для другого запроса");
+            const existing = (
+              await client.query(
+                `SELECT h.id,h.expires_at AS "expiresAt",vr.id AS "resourceId",vr.code AS "resourceCode",
+                   vr.name AS "resourceName",vr.capacity,z.id AS "zoneId",z.name AS "zoneName"
+                 FROM hostess_holds h LEFT JOIN hostess_hold_resources hr ON hr.hold_id=h.id
+                 LEFT JOIN venue_resources vr ON vr.id=hr.resource_id
+                 LEFT JOIN venue_zones z ON z.id=vr.zone_id
+                 WHERE h.id=$1 AND h.guest_id=$2 AND h.expires_at>now() AND h.consumed_at IS NULL`,
+                [previous.hold_id, guestId],
+              )
+            ).rows[0];
+            if (!existing) throw new ApiError(409, "HOLD_EXPIRED", "Удержание истекло. Создайте новое");
+            return existing;
+          }
+        }
         await client.query("SELECT pg_advisory_xact_lock(728411001)");
         await client.query(
           "UPDATE hostess_holds SET consumed_at=now() WHERE guest_id=$1 AND consumed_at IS NULL",
           [guestId],
         );
-        return (
-          await client.query(
+        const created = !("tableIds" in input)
+          ? await createResourceHold(client, guestId, input)
+          : (
+              await client.query(
             `INSERT INTO hostess_holds(guest_id,table_ids,starts_at,ends_at,guests)
           VALUES($1,$2,$3,$4,$5) RETURNING id,expires_at AS "expiresAt"`,
             [guestId, input.tableIds, input.startsAt, input.endsAt, input.guests],
           )
-        ).rows[0];
+            ).rows[0];
+        if (input.idempotencyKey)
+          await client.query(
+            `INSERT INTO hostess_hold_idempotency(guest_id,idempotency_key,request_hash,hold_id)
+             VALUES($1,$2,$3,$4)`,
+            [guestId, input.idempotencyKey, requestHash, created.id],
+          );
+        return created;
       });
       return json(hold, 201);
     }
@@ -497,7 +616,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
         .object({
           guestId: uuid.optional(),
           holdId: uuid.optional(),
-          selection: selectionSchema.optional(),
+          selection: bookingSelectionSchema.optional(),
           quoteId: uuid.optional(),
           idempotencyKey: z.string().min(16).max(128),
         })
@@ -533,18 +652,22 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
         await client.query("SELECT pg_advisory_xact_lock(728411001)");
         let hold;
         if (input.selection) {
-          validateSelection(input.selection, HALL_TABLES);
           await client.query(
             "UPDATE hostess_holds SET consumed_at=now() WHERE guest_id=$1 AND consumed_at IS NULL",
             [guestId],
           );
-          const selection = input.selection;
-          hold = (
-            await client.query(
-              "INSERT INTO hostess_holds(guest_id,table_ids,guests,starts_at,ends_at) VALUES($1,$2,$3,$4,$5) RETURNING *",
-              [guestId, selection.tableIds, selection.guests, selection.startsAt, selection.endsAt],
-            )
-          ).rows[0];
+          if ("tableIds" in input.selection) {
+            validateSelection(input.selection, HALL_TABLES);
+            const selection = input.selection;
+            hold = (
+              await client.query(
+                "INSERT INTO hostess_holds(guest_id,table_ids,guests,starts_at,ends_at) VALUES($1,$2,$3,$4,$5) RETURNING *",
+                [guestId, selection.tableIds, selection.guests, selection.startsAt, selection.endsAt],
+              )
+            ).rows[0];
+          } else {
+            hold = await createResourceHold(client, guestId, input.selection);
+          }
         } else
           hold = (
             await client.query(
@@ -571,7 +694,9 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
         const r = await client.query(
           `INSERT INTO command_center_reservations
           (guest_id,guest_name,phone,guests,starts_at,ends_at,table_id,table_label,table_ids,hold_id,status,source)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'expected',$11) RETURNING id`,
+          VALUES($1,$2,$3,$4,$5,$6,$7,
+            COALESCE((SELECT vr.name FROM hostess_hold_resources hr JOIN venue_resources vr ON vr.id=hr.resource_id WHERE hr.hold_id=$10),$8),
+            $9,$10,'expected',$11) RETURNING id`,
           [
             guestId,
             guest.name,
@@ -587,6 +712,12 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
           ],
         );
         const id = r.rows[0].id;
+        await client.query(
+          `INSERT INTO command_center_reservation_resources(reservation_id,resource_id)
+           SELECT $1,resource_id FROM hostess_hold_resources WHERE hold_id=$2
+           ON CONFLICT (reservation_id) DO UPDATE SET resource_id=EXCLUDED.resource_id`,
+          [id, hold.id],
+        );
         if (quote) {
           for (const line of quote.lines)
             await client.query(
@@ -666,7 +797,8 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
             [r.id],
           );
           await client.query(
-            `UPDATE command_center_reservations SET table_id=$2,table_label=$3,table_ids=$4,
+            `UPDATE command_center_reservations SET table_id=$2,
+            table_label=COALESCE((SELECT vr.name FROM hostess_hold_resources hr JOIN venue_resources vr ON vr.id=hr.resource_id WHERE hr.hold_id=$7),$3),table_ids=$4,
             starts_at=$5,ends_at=$6,hold_id=$7,guests=$8,status='expected',updated_at=now() WHERE id=$1`,
             [
               r.id,
@@ -678,6 +810,12 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
               h.id,
               h.guests,
             ],
+          );
+          await client.query("DELETE FROM command_center_reservation_resources WHERE reservation_id=$1", [r.id]);
+          await client.query(
+            `INSERT INTO command_center_reservation_resources(reservation_id,resource_id)
+             SELECT $1,resource_id FROM hostess_hold_resources WHERE hold_id=$2`,
+            [r.id, h.id],
           );
           await client.query("UPDATE hostess_holds SET consumed_at=now() WHERE id=$1", [h.id]);
         }
@@ -695,6 +833,8 @@ function apiFailure(e: unknown) {
     return json({ error: { code: "INVALID_INPUT", message: "Проверьте поля запроса" } }, 422);
   if ((e as { code?: string })?.code === "23P01")
     return json({ error: { code: "CONFLICT", message: "Стол уже занят. Выберите другой" } }, 409);
+  if ((e as { code?: string })?.code === "23514")
+    return json({ error: { code: "INVALID_SELECTION", message: "Проверьте выбранное место и число гостей" } }, 422);
   // Do not log raw requests, tokens, PII or driver errors/connection URLs.
   console.error("[booking] request failed", e instanceof Error ? e.name : "UnknownError");
   return json(
@@ -803,10 +943,12 @@ async function handleStaff(request: Request, url: URL) {
       if (found.role === "viewer") throw new ApiError(403, "FORBIDDEN", "Недостаточно прав");
       const input = z
         .object({
-          tableIds: z.array(z.string()).min(1).max(4),
+          tableIds: z.array(z.string()).min(1).max(4).optional(),
+          resourceId: uuid.optional(),
           reason: z.string().trim().min(3).max(300),
         })
         .strict()
+        .refine((value) => Boolean(value.tableIds) !== Boolean(value.resourceId), "Выберите стол или ресурс")
         .parse(await body(request));
       await transaction(async (client) => {
         await client.query("SELECT pg_advisory_xact_lock(728411001)");
@@ -816,27 +958,55 @@ async function handleStaff(request: Request, url: URL) {
           ])
         ).rows[0];
         if (!r) throw new ApiError(404, "NOT_FOUND", "Бронь недоступна");
-        validateSelection(
-          {
-            startsAt: new Date(r.starts_at).toISOString(),
-            endsAt: new Date(r.ends_at).toISOString(),
-            guests: r.guests,
-            tableIds: input.tableIds,
-          },
-          HALL_TABLES,
-          true,
-        );
+        const startsAt = new Date(r.starts_at).toISOString();
+        const endsAt = new Date(r.ends_at).toISOString();
+        if (input.tableIds) {
+          validateSelection({ startsAt, endsAt, guests: r.guests, tableIds: input.tableIds }, HALL_TABLES, true);
+        } else {
+          validateBookingWindow({ startsAt, endsAt }, true);
+          const resource = (
+            await client.query<{ code: string; name: string; capacity: number | null; is_reservable: boolean; status: string }>(
+              `SELECT r.code,r.name,r.capacity,r.is_reservable,r.status FROM venue_resources r
+               JOIN venue_zones z ON z.id=r.zone_id WHERE r.id=$1 AND r.venue_code='xoxo' AND z.is_active`,
+              [input.resourceId],
+            )
+          ).rows[0];
+          if (!resource || !resource.is_reservable || resource.status !== "active")
+            throw new ApiError(422, "INVALID_RESOURCE", "Это место пока нельзя забронировать");
+          if (!resource.capacity || r.guests > resource.capacity)
+            throw new ApiError(422, "CAPACITY", "В выбранной комнате недостаточно мест");
+        }
         await actor(client, `staff:${found.staff_id}`);
-        await client.query(
-          "UPDATE command_center_reservations SET table_id=$2,table_label=$3,table_ids=$4,updated_at=now() WHERE id=$1",
-          [r.id, input.tableIds[0], input.tableIds.join(" + "), input.tableIds],
-        );
+        if (input.tableIds) {
+          await client.query(
+            "UPDATE command_center_reservations SET table_id=$2,table_label=$3,table_ids=$4,updated_at=now() WHERE id=$1",
+            [r.id, input.tableIds[0], input.tableIds.join(" + "), input.tableIds],
+          );
+          await client.query("DELETE FROM command_center_reservation_resources WHERE reservation_id=$1", [r.id]);
+        } else {
+          const resource = (
+            await client.query<{ code: string; name: string }>(
+              `SELECT r.code,r.name FROM venue_resources r JOIN venue_zones z ON z.id=r.zone_id
+               WHERE r.id=$1 AND r.venue_code='xoxo' AND z.is_active`,
+              [input.resourceId],
+            )
+          ).rows[0]!;
+          await client.query(
+            "UPDATE command_center_reservations SET table_id=$2,table_label=$3,table_ids=$4,updated_at=now() WHERE id=$1",
+            [r.id, resource.code, resource.name, [resource.code]],
+          );
+          await client.query(
+            `INSERT INTO command_center_reservation_resources(reservation_id,resource_id) VALUES($1,$2)
+             ON CONFLICT (reservation_id) DO UPDATE SET resource_id=EXCLUDED.resource_id`,
+            [r.id, input.resourceId],
+          );
+        }
         await client.query(
           "INSERT INTO hostess_audit(actor,action,entity_id,details) VALUES($1,'staff_move',$2,$3)",
           [
             `staff:${found.staff_id}`,
             r.id,
-            JSON.stringify({ reason: input.reason, tables: input.tableIds }),
+            JSON.stringify({ reason: input.reason, tables: input.tableIds ?? null, resourceId: input.resourceId ?? null }),
           ],
         );
       });

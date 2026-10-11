@@ -62,6 +62,7 @@ beforeAll(async () => {
     "0001_reservations.sql",
     "0002_reservation_tables.sql",
     "0003_guest_booking.sql",
+    "0004_venue_inventory.sql",
   ])
     await pool.query(
       readFileSync(`C:/hostess-command-center/src/server/db/migrations/${file}`, "utf8"),
@@ -116,6 +117,80 @@ describe("guest security", () => {
   });
 });
 describe("canonical reservation transactions", () => {
+  test("VIP capacity, hold idempotency, saved resource link, and cancellation release", async () => {
+    const guest = await bootstrap();
+    const vip2 = (
+      await pool.query("SELECT id FROM venue_resources WHERE venue_code='xoxo' AND code='VIP2'")
+    ).rows[0].id as string;
+    const vip3 = (
+      await pool.query("SELECT id FROM venue_resources WHERE venue_code='xoxo' AND code='VIP3'")
+    ).rows[0].id as string;
+    const window = interval(30);
+    const available = await api(
+      `/availability?startsAt=${encodeURIComponent(window.startsAt)}&endsAt=${encodeURIComponent(window.endsAt)}&guests=8`,
+      undefined,
+      { cookie: guest.cookie },
+    );
+    const rooms = new Map(available.data.resources.map((room: { code: string; fitsGuestCount: boolean }) => [room.code, room]));
+    expect(available.status).toBe(200);
+    expect(rooms.get("VIP2")?.fitsGuestCount).toBe(true);
+    expect(rooms.get("VIP3")?.fitsGuestCount).toBe(false);
+
+    const key = randomToken();
+    const selection = { ...window, guests: 8, resourceId: vip2, idempotencyKey: key };
+    const holds = await Promise.all([
+      api("/holds", selection, { cookie: guest.cookie }),
+      api("/holds", selection, { cookie: guest.cookie }),
+    ]);
+    expect(holds.map((result) => result.status)).toEqual([201, 201]);
+    expect(holds[0].data.id).toBe(holds[1].data.id);
+
+    const created = await api(
+      "/reservations",
+      { holdId: holds[0].data.id, idempotencyKey: randomToken() },
+      { cookie: guest.cookie },
+    );
+    expect(created.status).toBe(201);
+    expect(created.data.reservation.resourceName).toBe("VIP 2 — большая");
+    const link = await pool.query(
+      "SELECT resource_id FROM command_center_reservation_resources WHERE reservation_id=$1",
+      [created.data.reservation.id],
+    );
+    expect(link.rows[0].resource_id).toBe(vip2);
+
+    await pool.query("UPDATE command_center_reservations SET status='cancelled' WHERE id=$1", [
+      created.data.reservation.id,
+    ]);
+    const next = await api(
+      "/holds",
+      { ...window, guests: 8, resourceId: vip2, idempotencyKey: randomToken() },
+      { cookie: guest.cookie },
+    );
+    expect(next.status).toBe(201);
+    const tooMany = await api(
+      "/holds",
+      { ...interval(31), guests: 6, resourceId: vip3, idempotencyKey: randomToken() },
+      { cookie: guest.cookie },
+    );
+    expect(tooMany.status).toBe(422);
+    expect(tooMany.data.error.code).toBe("CAPACITY");
+  });
+
+  test("parallel requests cannot reserve the same VIP room", async () => {
+    const a = await bootstrap();
+    const b = await bootstrap();
+    const vip2 = (
+      await pool.query("SELECT id FROM venue_resources WHERE venue_code='xoxo' AND code='VIP2'")
+    ).rows[0].id as string;
+    const window = interval(32);
+    const selection = { ...window, guests: 8, resourceId: vip2 };
+    const results = await Promise.all([
+      api("/reservations", { selection, idempotencyKey: randomToken() }, { cookie: a.cookie }),
+      api("/reservations", { selection, idempotencyKey: randomToken() }, { cookie: b.cookie }),
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual([201, 409]);
+  });
+
   test("two concurrent holds: exactly one wins", async () => {
     const a = await bootstrap(),
       b = await bootstrap();

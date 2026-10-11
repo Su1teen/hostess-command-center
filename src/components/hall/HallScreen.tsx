@@ -52,7 +52,8 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
   const [panelOpen, setPanelOpen] = useState(openReservations);
-  const [create, setCreate] = useState<{ tableId: string | null } | null>(null);
+  const [create, setCreate] = useState<{ tableId: string | null; resourceId?: string | null } | null>(null);
+  const [activeZone, setActiveZone] = useState("vip");
   const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -72,6 +73,7 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
   }, [availability.data]);
   const entryFor = (tableId: string) =>
     availability.data?.tables.find((entry) => entry.tableId === tableId);
+  const activeZoneData = availability.data?.zones.find((zone) => zone.code === activeZone);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: RESERVATIONS_KEY });
 
@@ -122,6 +124,74 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
       )}
       <DateTimeSelector date={date} time={time} onDate={setDate} onTime={setTime} />
 
+      <section className="rounded-3xl bg-white p-4 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Подтверждённые зоны и ресурсы
+            </p>
+            <p className="mt-1 text-xs text-slate-400">Доступность на выбранное время</p>
+          </div>
+          {availability.isFetching && <span className="text-[11px] text-slate-400">Обновляем…</span>}
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
+          {availability.data?.zones.map((zone) => (
+            <button
+              key={zone.id}
+              type="button"
+              onClick={() => setActiveZone(zone.code)}
+              className={`shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${activeZone === zone.code ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}
+            >
+              {zone.name}
+            </button>
+          ))}
+        </div>
+        {activeZoneData?.resources.length ? (
+          <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-2">
+            {activeZoneData.resources.map((resource) => {
+              const reservation = board.data?.upcoming.find(
+                (item) =>
+                  item.tableIds.includes(resource.code) &&
+                  !["cancelled", "no_show"].includes(item.status) &&
+                  Date.parse(item.startsAt) < Date.parse(endsAt) &&
+                  Date.parse(item.endsAt ?? new Date(Date.parse(item.startsAt) + 2 * 3600_000).toISOString()) > Date.parse(startsAt),
+              );
+              return (
+                <button
+                  type="button"
+                  key={resource.id}
+                  disabled={!resource.available && !reservation}
+                  onClick={() => {
+                    if (reservation) setSelectedReservation(reservation);
+                    else {
+                      setCreateError(null);
+                      setCreate({ tableId: resource.code, resourceId: resource.id });
+                    }
+                  }}
+                  className={`rounded-2xl border p-3 text-left ${resource.available ? "border-emerald-100 bg-emerald-50" : "border-rose-100 bg-rose-50 disabled:opacity-60"}`}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="font-semibold">{resource.name}</span>
+                    <span className="text-xs text-slate-500">{resource.capacity} мест</span>
+                  </span>
+                  <span className="mt-1 block text-xs text-slate-500">
+                    {resource.available ? "Свободно · создать бронь" : reservation ? "Занято · открыть бронь" : "Недоступно"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="rounded-2xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">
+            {activeZoneData?.description ?? "В этой зоне нет подтверждённых ресурсов."}
+            {activeZoneData && " Физические места появятся после сверки карты и вместимости."}
+          </p>
+        )}
+      </section>
+
+      <p className="px-1 text-center text-[11px] text-slate-400">
+        Старая карта A/B/C сохранена для совместимости; её физическое соответствие ещё требует проверки.
+      </p>
       <FloorPlan
         occupancy={occupancy}
         selectedId={selectedTable}
@@ -186,6 +256,7 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
           initialDate={date}
           initialTime={time}
           initialTableId={create.tableId}
+          initialResourceId={create.resourceId}
           pending={createMutation.isPending}
           serverError={createError}
           onClose={() => setCreate(null)}
