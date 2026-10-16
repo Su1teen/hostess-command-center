@@ -10,8 +10,6 @@ const consumer = process.env.HOSTESS_CONSUMER_ROOT
   : consumerFixture;
 const { tableSchema, quoteSchema, orderSchema, walletSchema, transactionSchema } = consumer;
 import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
-import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { pool } from "../src/server/db/pool";
 import { transaction, newSession } from "../src/server/guest/auth";
