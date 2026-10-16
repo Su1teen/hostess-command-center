@@ -85,11 +85,13 @@ export function OrdersScreen() {
   const orders = list.data?.orders ?? [],
     order = detail.data?.order;
   const groups = group
-    ? Object.entries(
-        orders.reduce<Record<string, DineOrder[]>>((acc, o) => {
-          (acc[o.tableCode] ??= []).push(o);
+    ? Array.from(
+        orders.reduce<Map<string, DineOrder[]>>((acc, o) => {
+          const rows = acc.get(o.tableCode) ?? [];
+          rows.push(o);
+          acc.set(o.tableCode, rows);
           return acc;
-        }, {}),
+        }, new Map()),
       )
     : [["Все заказы", orders] as [string, DineOrder[]]];
   function change(path: string, data: unknown, method = "PATCH") {

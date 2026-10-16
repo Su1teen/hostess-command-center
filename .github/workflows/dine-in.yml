@@ -5,7 +5,7 @@ on:
   pull_request:
     branches: [main]
 permissions:
-  contents: write
+  contents: read
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -34,17 +34,6 @@ jobs:
         with:
           bun-version: 1.3.13
       - run: bun install --frozen-lockfile
-      - name: Normalize formatting on the implementation branch
-        if: github.ref == 'refs/heads/feat/xoxo-qr-dining-loyalty'
-        run: |
-          node node_modules/eslint/bin/eslint.js . --fix
-          if ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -u
-            git commit -m "style: normalize implementation formatting"
-            git push
-          fi
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run build
