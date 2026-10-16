@@ -228,7 +228,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
           [identity.subject],
         );
         if (existing.rows[0] && !input.claimCode) {
-          await mergeVerifiedStaffGuests(client,existing.rows[0].guest_id,identity.phone);
+          await mergeVerifiedStaffGuests(client, existing.rows[0].guest_id, identity.phone);
           return existing.rows[0].guest_id as string;
         }
         let provisionalId: string | undefined;
@@ -278,7 +278,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
             `INSERT INTO hostess_audit(actor,action,entity_id,details) VALUES('whatsapp','provisional_merged',$1,jsonb_build_object('provisionalId',$2::text))`,
             [canonical, provisionalId],
           );
-          await mergeVerifiedStaffGuests(client,canonical,identity.phone);
+          await mergeVerifiedStaffGuests(client, canonical, identity.phone);
           return canonical as string;
         }
         if (provisionalId) {
@@ -293,7 +293,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
             `INSERT INTO hostess_phone_verifications(guest_id,phone,identity_id) VALUES($1,$2,$3)`,
             [provisionalId, identity.phone, identityRow.rows[0].id],
           );
-          await mergeVerifiedStaffGuests(client,provisionalId,identity.phone);
+          await mergeVerifiedStaffGuests(client, provisionalId, identity.phone);
           return provisionalId;
         }
         const created = await client.query(
@@ -315,7 +315,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
           `INSERT INTO hostess_audit(actor,action,entity_id) VALUES('whatsapp','identity_verified',$1)`,
           [id],
         );
-        await mergeVerifiedStaffGuests(client,id,identity.phone);
+        await mergeVerifiedStaffGuests(client, id, identity.phone);
         return id as string;
       });
       return json({ guestId: guest });

@@ -26,7 +26,8 @@ let table: { token: string; resource_id: string },
   price = 1590,
   seconds = 600,
   outboxFail = false;
-let invalidAck=false,permanentFailure=false;
+let invalidAck = false,
+  permanentFailure = false;
 const staff: Record<string, string> = {},
   delivered: string[] = [];
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -605,28 +606,94 @@ test("outbox retries stable IDs and orders acceptance before cancellation", asyn
   process.env.DINE_IN_OUTBOX_ENABLED = "no";
 });
 
-test("verified WhatsApp unifies staff-created profile without a typed-phone claim",async()=>{
-  const phone="+77016660011",jid="77016660011@c.us";
-  const response=await api("/api/staff/v1/guests",{name:"Staff verified merge",phone},{cookie:staff.manager});
-  expect(response.status).toBe(201);const manual=(await response.json()).guest;await lot(manual.id,50000);
-  const order=await submit(anon());await changeStatus(order.order.id,venueId,"manager",undefined,undefined,undefined,manual.id);
-  const wa=()=>handleBookingApi(new Request("https://command.test/api/guest/v1/identity",{method:"POST",headers:{"content-type":"application/json","x-hostess-service-key":process.env.WHATSAPP_SERVICE_KEY!,"x-whatsapp-sender-jid":jid},body:JSON.stringify({name:"Verified owner",jid,consent:true})}));
-  const verified=(await (await wa())!.json()).guestId;
+test("verified WhatsApp unifies staff-created profile without a typed-phone claim", async () => {
+  const phone = "+77016660011",
+    jid = "77016660011@c.us";
+  const response = await api(
+    "/api/staff/v1/guests",
+    { name: "Staff verified merge", phone },
+    { cookie: staff.manager },
+  );
+  expect(response.status).toBe(201);
+  const manual = (await response.json()).guest;
+  await lot(manual.id, 50000);
+  const order = await submit(anon());
+  await changeStatus(
+    order.order.id,
+    venueId,
+    "manager",
+    undefined,
+    undefined,
+    undefined,
+    manual.id,
+  );
+  const wa = () =>
+    handleBookingApi(
+      new Request("https://command.test/api/guest/v1/identity", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-hostess-service-key": process.env.WHATSAPP_SERVICE_KEY!,
+          "x-whatsapp-sender-jid": jid,
+        },
+        body: JSON.stringify({ name: "Verified owner", jid, consent: true }),
+      }),
+    );
+  const verified = (await (await wa())!.json()).guestId;
   expect((await balance(verified)).balanceMinor).toBe(50000);
-  expect((await pool.query("SELECT merged_into FROM hostess_guests WHERE id=$1",[manual.id])).rows[0].merged_into).toBe(verified);
-  expect((await pool.query("SELECT guest_id FROM dine_in_orders WHERE id=$1",[order.order.id])).rows[0].guest_id).toBe(verified);
+  expect(
+    (await pool.query("SELECT merged_into FROM hostess_guests WHERE id=$1", [manual.id])).rows[0]
+      .merged_into,
+  ).toBe(verified);
+  expect(
+    (await pool.query("SELECT guest_id FROM dine_in_orders WHERE id=$1", [order.order.id])).rows[0]
+      .guest_id,
+  ).toBe(verified);
   expect((await (await wa())!.json()).guestId).toBe(verified);
   expect((await balance(verified)).balanceMinor).toBe(50000);
 });
-test("outbox requires accepted ACK and retains permanent failures until manager retry",async()=>{
-  const o=await submit(anon());process.env.DINE_IN_OUTBOX_ENABLED="yes";invalidAck=true;
-  for(let i=0;i<20;i++)await drainOutbox();
-  let row=(await pool.query("SELECT * FROM integration_outbox WHERE order_id=$1",[o.order.id])).rows[0];
-  expect(row.status).toBe("failed");expect(row.last_error).toBe("INVALID_ACK");expect(row.terminal).toBe(false);
-  invalidAck=false;permanentFailure=true;await pool.query("UPDATE integration_outbox SET next_attempt_at=now() WHERE order_id=$1",[o.order.id]);await drainOutbox();
-  row=(await pool.query("SELECT * FROM integration_outbox WHERE order_id=$1",[o.order.id])).rows[0];expect(row.terminal).toBe(true);
-  expect((await api("/api/staff/v1/dine-in/outbox/retry",{reason:"Retry fixture"},{cookie:staff.operator})).status).toBe(403);
-  expect((await api("/api/staff/v1/dine-in/outbox/retry",{reason:"Corrected receiver"},{cookie:staff.manager})).status).toBe(200);
-  permanentFailure=false;for(let i=0;i<20;i++)await drainOutbox();
-  expect((await pool.query("SELECT status FROM integration_outbox WHERE order_id=$1",[o.order.id])).rows[0].status).toBe("delivered");process.env.DINE_IN_OUTBOX_ENABLED="no";
+test("outbox requires accepted ACK and retains permanent failures until manager retry", async () => {
+  const o = await submit(anon());
+  process.env.DINE_IN_OUTBOX_ENABLED = "yes";
+  invalidAck = true;
+  for (let i = 0; i < 20; i++) await drainOutbox();
+  let row = (await pool.query("SELECT * FROM integration_outbox WHERE order_id=$1", [o.order.id]))
+    .rows[0];
+  expect(row.status).toBe("failed");
+  expect(row.last_error).toBe("INVALID_ACK");
+  expect(row.terminal).toBe(false);
+  invalidAck = false;
+  permanentFailure = true;
+  await pool.query("UPDATE integration_outbox SET next_attempt_at=now() WHERE order_id=$1", [
+    o.order.id,
+  ]);
+  await drainOutbox();
+  row = (await pool.query("SELECT * FROM integration_outbox WHERE order_id=$1", [o.order.id]))
+    .rows[0];
+  expect(row.terminal).toBe(true);
+  expect(
+    (
+      await api(
+        "/api/staff/v1/dine-in/outbox/retry",
+        { reason: "Retry fixture" },
+        { cookie: staff.operator },
+      )
+    ).status,
+  ).toBe(403);
+  expect(
+    (
+      await api(
+        "/api/staff/v1/dine-in/outbox/retry",
+        { reason: "Corrected receiver" },
+        { cookie: staff.manager },
+      )
+    ).status,
+  ).toBe(200);
+  permanentFailure = false;
+  for (let i = 0; i < 20; i++) await drainOutbox();
+  expect(
+    (await pool.query("SELECT status FROM integration_outbox WHERE order_id=$1", [o.order.id]))
+      .rows[0].status,
+  ).toBe("delivered");
+  process.env.DINE_IN_OUTBOX_ENABLED = "no";
 });
