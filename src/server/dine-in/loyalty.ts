@@ -262,3 +262,20 @@ export async function mergeDiningGuest(client: PoolClient, from: string, to: str
   ]);
   // Lots and immutable ledger stay in original wallets; canonical views include the alias tree.
 }
+
+export async function mergeVerifiedStaffGuests(client:PoolClient,canonical:string,phone:string) {
+  if(!(await client.query("SELECT to_regclass('hostess_venues') AS name")).rows[0].name)return;
+  await loyaltyLock(client);
+  const proof=await client.query("SELECT 1 FROM hostess_phone_verifications WHERE guest_id=$1 AND phone=$2",[canonical,phone]);
+  if(!proof.rowCount)throw new ApiError(403,"OWNERSHIP_UNVERIFIED","Требуется подтверждённый контакт");
+  const candidates=(await client.query("SELECT id FROM hostess_guests WHERE phone=$1 AND source='staff' AND provisional AND merged_into IS NULL AND id<>$2 ORDER BY id FOR UPDATE",[phone,canonical])).rows;
+  for(const candidate of candidates) {
+    await mergeDiningGuest(client,candidate.id,canonical);
+    await client.query("SELECT set_config('hostess.actor',$1,true)",["whatsapp:"+canonical]);
+    await client.query("UPDATE command_center_reservations SET guest_id=$1,updated_at=now() WHERE guest_id=$2",[canonical,candidate.id]);
+    await client.query("UPDATE hostess_quotes SET guest_id=$1 WHERE guest_id=$2",[canonical,candidate.id]);
+    await client.query("UPDATE hostess_holds SET guest_id=$1 WHERE guest_id=$2",[canonical,candidate.id]);
+    await client.query("UPDATE hostess_sessions SET revoked_at=now() WHERE guest_id=$1",[candidate.id]);
+    await client.query("INSERT INTO hostess_audit(actor,action,entity_id,details) VALUES($1,'staff_guest_verified_merge',$2,$3)",["whatsapp:"+canonical,canonical,JSON.stringify({provisionalId:candidate.id})]);
+  }
+}

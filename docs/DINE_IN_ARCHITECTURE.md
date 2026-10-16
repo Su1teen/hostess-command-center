@@ -29,7 +29,7 @@ All staff writes enforce existing exact-origin checks and staff role checks. Vie
 ## Identity merge
 
 Typing a phone only creates an unverified/provisional profile and a new session; it never claims another profile or its wallet. Existing verified WhatsApp identity/ownership proof is required for merging.
-Merge preserves immutable ledger entries in original wallets and records merged_into aliases. Canonical balance and redemption traverse the alias family. Orders point to the canonical guest; old provisional sessions are revoked by the identity API. There is no duplicate earning during merge.
+Merge preserves immutable ledger entries in original wallets and records merged_into aliases. Canonical balance and redemption traverse the alias family. Orders point to the canonical guest; old provisional sessions are revoked by the identity API. There is no duplicate earning during merge. A real verified WhatsApp sender also unifies matching staff-created provisional profiles automatically, including their orders, bookings and wallet aliases; merely typing that phone never invokes this merge.
 
 ## Cancellation and expiry
 
