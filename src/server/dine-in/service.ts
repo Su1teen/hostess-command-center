@@ -163,7 +163,7 @@ export async function enqueue(
     `INSERT INTO integration_outbox(venue_id,order_id,order_item_id,event_type,payload)
     SELECT o.venue_id,o.id,i.id,$2,jsonb_build_object('orderId',o.id,'orderItemId',i.id,'exchangeProductId',i.exchange_product_id,
       'roundId',i.round_id,'quantity',i.quantity,'unitPrice',i.unit_price_minor/100.0,'unitPriceMinor',i.unit_price_minor::text,'currency','KZT',
-      'occurredAt',clock_timestamp(),'venueCode',v.slug,'eventType',$2::text)
+      'occurredAt',CASE WHEN $2='ORDER_ACCEPTED' THEN o.accepted_at ELSE clock_timestamp() END,'venueCode',v.slug,'eventType',$2::text)
     FROM dine_in_orders o JOIN dine_in_order_items i ON i.order_id=o.id JOIN hostess_venues v ON v.id=o.venue_id WHERE o.id=$1
     ON CONFLICT(order_item_id,event_type) DO NOTHING`,
     [order.id, type],

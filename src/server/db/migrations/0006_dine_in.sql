@@ -105,7 +105,7 @@ CREATE TABLE integration_outbox (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), venue_id uuid NOT NULL, order_id uuid NOT NULL,
   event_type text NOT NULL CHECK(event_type IN ('ORDER_ACCEPTED','ORDER_CANCELLED')), order_item_id uuid NOT NULL REFERENCES dine_in_order_items(id),
   payload jsonb NOT NULL, status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','delivering','delivered','failed')),
-  attempts integer NOT NULL DEFAULT 0 CHECK(attempts>=0), next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  terminal boolean NOT NULL DEFAULT false, attempts integer NOT NULL DEFAULT 0 CHECK(attempts>=0), next_attempt_at timestamptz NOT NULL DEFAULT now(),
   locked_until timestamptz, lease_token uuid, delivered_at timestamptz, last_error text, created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(order_item_id,event_type), FOREIGN KEY(venue_id,order_id) REFERENCES dine_in_orders(venue_id,id)
 );

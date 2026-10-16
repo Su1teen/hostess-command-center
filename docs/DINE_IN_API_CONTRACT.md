@@ -59,11 +59,9 @@ Each payload identifies ONE order line:
   "exchangeProductId": "Exchange product ID",
   "roundId": "published round ID",
   "quantity": 3,
-  "unitPrice": 1590,
-  "unitPriceMinor": "159000",
-  "currency": "KZT",
+  "unitPrice": "1590.00",
   "occurredAt": "ISO timestamp",
   "venueCode": "xoxo"
 }
 
-unitPrice is KZT for compatibility; unitPriceMinor is the exact decimal-string tiyn value. Accept duplicate eventId as a successful 2xx no-op. Keep the originating round identity; receiving a historic accepted order must not silently apply a new round price or insert a second complete order. Quantity is positive for both event types; cancellation semantics come from eventType. Sender waits for accepted delivery before sending cancellation for the same line. Return 2xx only once the receiver has durably accepted/deduplicated the event.
+unitPrice is an exact KZT decimal string with two fractional digits. The strict XOXO v1 wire payload omits currency and unitPriceMinor; those remain internal Command Center fields. Accept duplicate eventId as a successful 2xx no-op. Keep the originating round identity; receiving a historic accepted order must not silently apply a new round price or insert a second complete order. Quantity is positive for both event types; cancellation semantics come from eventType. Sender waits for accepted delivery before sending cancellation for the same line. The sender requires HTTP success plus accepted=true and the matching eventId. Permanent 4xx failures are retained as terminal failed rows for manual reconciliation. Return 2xx only once the receiver has durably accepted/deduplicated the event.
