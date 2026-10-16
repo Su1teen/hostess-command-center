@@ -67,7 +67,10 @@ export const inventorySelectionSchema = z
   })
   .strict();
 export const bookingSelectionSchema = z.union([selectionSchema, inventorySelectionSchema]);
-export function validateBookingWindow(input: { startsAt: string; endsAt: string }, allowPast = false) {
+export function validateBookingWindow(
+  input: { startsAt: string; endsAt: string },
+  allowPast = false,
+) {
   intervalSchema.parse(input);
   if (
     (!allowPast && Date.parse(input.startsAt) < Date.now()) ||

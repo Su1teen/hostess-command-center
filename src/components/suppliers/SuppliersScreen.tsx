@@ -10,8 +10,22 @@ export function SuppliersScreen() {
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState({ name: "", category: "", contact: "", phone: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
-  useEffect(() => { try { const saved = localStorage.getItem("xoxo:suppliers:v1"); if (saved) setSuppliers(JSON.parse(saved) as DemoSupplier[]); } catch { /* Use demo suppliers. */ } }, []);
-  const saveSuppliers = (next: DemoSupplier[]) => { setSuppliers(next); try { localStorage.setItem("xoxo:suppliers:v1", JSON.stringify(next)); } catch { /* Session changes still work. */ } };
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("xoxo:suppliers:v1");
+      if (saved) setSuppliers(JSON.parse(saved) as DemoSupplier[]);
+    } catch {
+      /* Use demo suppliers. */
+    }
+  }, []);
+  const saveSuppliers = (next: DemoSupplier[]) => {
+    setSuppliers(next);
+    try {
+      localStorage.setItem("xoxo:suppliers:v1", JSON.stringify(next));
+    } catch {
+      /* Session changes still work. */
+    }
+  };
 
   const addSupplier = () => {
     if (!draft.name.trim() || !draft.phone.trim()) return;
@@ -29,7 +43,18 @@ export function SuppliersScreen() {
       products: [],
     };
     const next = editingId
-      ? suppliers.map((item) => item.id === editingId ? { ...item, name: supplier.name, category: supplier.category, contact: supplier.contact, phone: supplier.phone, whatsapp: supplier.whatsapp } : item)
+      ? suppliers.map((item) =>
+          item.id === editingId
+            ? {
+                ...item,
+                name: supplier.name,
+                category: supplier.category,
+                contact: supplier.contact,
+                phone: supplier.phone,
+                whatsapp: supplier.whatsapp,
+              }
+            : item,
+        )
       : [supplier, ...suppliers];
     saveSuppliers(next);
     setExpandedId(supplier.id);
@@ -38,8 +63,21 @@ export function SuppliersScreen() {
     setShowForm(false);
   };
 
-  const editSupplier = (supplier: DemoSupplier) => { setEditingId(supplier.id); setDraft({ name: supplier.name, category: supplier.category, contact: supplier.contact, phone: supplier.phone }); setShowForm(true); };
-  const deleteSupplier = (supplier: DemoSupplier) => { if (!window.confirm(`Удалить поставщика «${supplier.name}»?`)) return; saveSuppliers(suppliers.filter((item) => item.id !== supplier.id)); if (expandedId === supplier.id) setExpandedId(null); };
+  const editSupplier = (supplier: DemoSupplier) => {
+    setEditingId(supplier.id);
+    setDraft({
+      name: supplier.name,
+      category: supplier.category,
+      contact: supplier.contact,
+      phone: supplier.phone,
+    });
+    setShowForm(true);
+  };
+  const deleteSupplier = (supplier: DemoSupplier) => {
+    if (!window.confirm(`Удалить поставщика «${supplier.name}»?`)) return;
+    saveSuppliers(suppliers.filter((item) => item.id !== supplier.id));
+    if (expandedId === supplier.id) setExpandedId(null);
+  };
 
   return (
     <div className="space-y-5 px-4 pb-32 pt-6">
@@ -153,8 +191,20 @@ export function SuppliersScreen() {
                     </a>
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2">
-                    <button type="button" onClick={() => editSupplier(supplier)} className="flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-slate-100 text-sm font-semibold text-slate-700"><Pencil size={15}/> Редактировать</button>
-                    <button type="button" onClick={() => deleteSupplier(supplier)} className="flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-rose-50 text-sm font-semibold text-rose-700"><Trash2 size={15}/> Удалить</button>
+                    <button
+                      type="button"
+                      onClick={() => editSupplier(supplier)}
+                      className="flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-slate-100 text-sm font-semibold text-slate-700"
+                    >
+                      <Pencil size={15} /> Редактировать
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteSupplier(supplier)}
+                      className="flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-rose-50 text-sm font-semibold text-rose-700"
+                    >
+                      <Trash2 size={15} /> Удалить
+                    </button>
                   </div>
                 </div>
               )}
@@ -167,7 +217,11 @@ export function SuppliersScreen() {
         <BottomSheet
           eyebrow={editingId ? "Карточка поставщика" : "Новый партнёр"}
           title={editingId ? "Редактировать поставщика" : "Добавить поставщика"}
-          onClose={() => { setShowForm(false); setEditingId(null); setDraft({ name: "", category: "", contact: "", phone: "" }); }}
+          onClose={() => {
+            setShowForm(false);
+            setEditingId(null);
+            setDraft({ name: "", category: "", contact: "", phone: "" });
+          }}
         >
           <div className="space-y-3 pb-2">
             <input

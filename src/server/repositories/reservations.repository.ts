@@ -236,9 +236,12 @@ export async function insert(
       );
     }
     await client.query("COMMIT");
-    return (await getById(row.id)) ?? mapReservation(
-      row,
-      preorders.map((preorder, index) => ({ ...preorder, id: `new-${index}` })),
+    return (
+      (await getById(row.id)) ??
+      mapReservation(
+        row,
+        preorders.map((preorder, index) => ({ ...preorder, id: `new-${index}` })),
+      )
     );
   } catch (error) {
     if (!(error instanceof ReservationConflictError)) await client.query("ROLLBACK");

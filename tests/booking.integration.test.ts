@@ -132,7 +132,12 @@ describe("canonical reservation transactions", () => {
       undefined,
       { cookie: guest.cookie },
     );
-    const rooms = new Map(available.data.resources.map((room: { code: string; fitsGuestCount: boolean }) => [room.code, room]));
+    const rooms = new Map(
+      available.data.resources.map((room: { code: string; fitsGuestCount: boolean }) => [
+        room.code,
+        room,
+      ]),
+    );
     expect(available.status).toBe(200);
     expect(rooms.get("VIP2")?.fitsGuestCount).toBe(true);
     expect(rooms.get("VIP3")?.fitsGuestCount).toBe(false);

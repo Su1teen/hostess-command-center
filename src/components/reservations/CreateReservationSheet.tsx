@@ -160,7 +160,9 @@ export function CreateReservationSheet({
 
         <section>
           <div className="mb-2 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Подтверждённые ресурсы</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Подтверждённые ресурсы
+            </p>
             {availability.isFetching && (
               <span className="text-[11px] text-slate-400">Обновляем…</span>
             )}
@@ -233,7 +235,9 @@ export function CreateReservationSheet({
               Этот стол занят на выбранное время — выберите другое время или стол
             </p>
           )}
-          {tableError && !tableId && !resourceId && <p className="mt-2 text-xs text-rose-600">Выберите место</p>}
+          {tableError && !tableId && !resourceId && (
+            <p className="mt-2 text-xs text-rose-600">Выберите место</p>
+          )}
         </section>
 
         <section className="space-y-2">
