@@ -1,5 +1,5 @@
 import type { PoolClient } from "pg";
-import {pageCursor} from "./presentation";
+import { pageCursor } from "./presentation";
 import { ApiError } from "../guest/security";
 
 // Same lock is used during identity merge. The pilot prioritizes correctness over throughput.
@@ -39,9 +39,18 @@ export async function walletView(client: PoolClient, venueId: string, guestId: s
     )
   ).rows[0];
   const debt = list.reduce((n, w) => n + Number(w.debt_minor), 0);
-  const lots=(await client.query('SELECT id,remaining_minor::text AS "remainingMinor",expires_at AS "expiresAt" FROM loyalty_lots WHERE wallet_id=ANY($1::uuid[]) AND expires_at>clock_timestamp() AND reversed_at IS NULL AND remaining_minor>0 ORDER BY expires_at,id',[ids])).rows.map(l=>({...l,remaining:Number(l.remainingMinor)/100}));
+  const lots = (
+    await client.query(
+      'SELECT id,remaining_minor::text AS "remainingMinor",expires_at AS "expiresAt" FROM loyalty_lots WHERE wallet_id=ANY($1::uuid[]) AND expires_at>clock_timestamp() AND reversed_at IS NULL AND remaining_minor>0 ORDER BY expires_at,id',
+      [ids],
+    )
+  ).rows.map((l) => ({ ...l, remaining: Number(l.remainingMinor) / 100 }));
   return {
-    balance:Math.max(0,Number(row.gross)-debt)/100,expiringAmount:Math.min(Math.max(0,Number(row.gross)-debt),Number(row.expiringMinor))/100,nextExpiresAt:row.nextExpiry,lots,
+    balance: Math.max(0, Number(row.gross) - debt) / 100,
+    expiringAmount:
+      Math.min(Math.max(0, Number(row.gross) - debt), Number(row.expiringMinor)) / 100,
+    nextExpiresAt: row.nextExpiry,
+    lots,
     currency: "KZT",
     balanceMinor: Math.max(0, Number(row.gross) - debt),
     debtMinor: debt,
@@ -56,15 +65,15 @@ export async function ledger(
   before?: string | null,
 ) {
   const ids = (await wallets(client, venueId, guestId)).map((w) => w.id);
-  const [at,id]=pageCursor(before);
+  const [at, id] = pageCursor(before);
   return (
     await client.query(
       `SELECT t.id,t.type,t.amount_minor::text AS "amountMinor",t.order_id AS "orderId",t.created_at AS "createdAt",t.details,
     to_char(t.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "paginationTime",l.expires_at AS "expiresAt" FROM loyalty_transactions t LEFT JOIN loyalty_lots l ON l.id=t.lot_id
     WHERE t.wallet_id=ANY($1::uuid[]) AND ($2::timestamptz IS NULL OR ($3::uuid IS NULL AND t.created_at<$2) OR (t.created_at,t.id)<($2::timestamptz,$3::uuid)) ORDER BY t.created_at DESC,t.id DESC LIMIT 200`,
-      [ids,at,id],
+      [ids, at, id],
     )
-   ).rows.map(t=>({...t,amount:Number(t.amountMinor)/100}));
+  ).rows.map((t) => ({ ...t, amount: Number(t.amountMinor) / 100 }));
 }
 export async function expireLots(client: PoolClient, ids: string[]) {
   const lots = (

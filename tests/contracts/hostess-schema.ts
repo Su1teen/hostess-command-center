@@ -1,5 +1,5 @@
 // Consumer compatibility fixture: Su1teen/hostess src/lib/dine-in-api.ts, 2026-10-16.
-import {z} from "zod";
+import { z } from "zod";
 const id = z.string().min(1).max(200);
 const amount = z.number().finite().nonnegative();
 const date = z.string().datetime({ offset: true });

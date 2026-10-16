@@ -1,5 +1,5 @@
 import { z } from "zod";
-import {guestQuote,guestOrder,pageCursor} from "./presentation";
+import { guestQuote, guestOrder, pageCursor } from "./presentation";
 import { pool } from "../db/pool";
 import {
   transaction,
@@ -188,30 +188,54 @@ export async function handleDiningApi(request: Request): Promise<Response | null
           zoneName: t.zone_name,
           enabled: t.enabled,
           currency: "KZT",
-          venue:{id:t.venue_id,slug:t.slug,name:t.display_name,currency:"KZT"},table:{resourceId:t.resource_id,code:t.code,name:t.name,zoneName:t.zone_name},
+          venue: { id: t.venue_id, slug: t.slug, name: t.display_name, currency: "KZT" },
+          table: { resourceId: t.resource_id, code: t.code, name: t.name, zoneName: t.zone_name },
         });
       }
       if (path === "/dine-in/menu" && method === "GET") {
         const v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
         if (v.slug !== "xoxo")
           throw new ApiError(422, "UNSUPPORTED_VENUE", "Меню заведения пока недоступно");
-        const menu=await snapshot();
-        return json({...menu,products:menu.products.map(product=>({...product,price:toMinor(product.price)/100}))});
+        const menu = await snapshot();
+        return json({
+          ...menu,
+          products: menu.products.map((product) => ({
+            ...product,
+            price: toMinor(product.price) / 100,
+          })),
+        });
       }
       if (path === "/dine-in/quotes" && method === "POST") {
         const context = await getOwner(request, true);
-        return json(guestQuote(await createQuote(context.owner, await body(request))), 201, context.setCookie);
+        return json(
+          guestQuote(await createQuote(context.owner, await body(request))),
+          201,
+          context.setCookie,
+        );
       }
-      if(path==="/dine-in/orders" && method==="GET"){
-        const found=await session(request);if(!found?.guest_id)throw new ApiError(401,"SESSION_REQUIRED","Войдите для просмотра заказов");
-        const [at,id]=pageCursor(url.searchParams.get("before")),v=await venue(pool,url.searchParams.get("venue")??"xoxo");
-        const rows=(await pool.query('SELECT id,to_char(accepted_at AT TIME ZONE \'UTC\',\'YYYY-MM-DD"T"HH24:MI:SS.US"Z"\') AS "paginationTime" FROM dine_in_orders WHERE venue_id=$1 AND guest_id=$2 AND ($3::timestamptz IS NULL OR ($4::uuid IS NULL AND accepted_at<$3) OR (accepted_at,id)<($3::timestamptz,$4::uuid)) ORDER BY accepted_at DESC,id DESC LIMIT 100',[v.id,found.guest_id,at,id])).rows;
-        return json({orders:await Promise.all(rows.map(async r=>guestOrder(await orderDetail(pool,r.id,v.id)))),nextCursor:rows.length===100?rows[99].paginationTime+"|"+rows[99].id:null});
+      if (path === "/dine-in/orders" && method === "GET") {
+        const found = await session(request);
+        if (!found?.guest_id)
+          throw new ApiError(401, "SESSION_REQUIRED", "Войдите для просмотра заказов");
+        const [at, id] = pageCursor(url.searchParams.get("before")),
+          v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
+        const rows = (
+          await pool.query(
+            'SELECT id,to_char(accepted_at AT TIME ZONE \'UTC\',\'YYYY-MM-DD"T"HH24:MI:SS.US"Z"\') AS "paginationTime" FROM dine_in_orders WHERE venue_id=$1 AND guest_id=$2 AND ($3::timestamptz IS NULL OR ($4::uuid IS NULL AND accepted_at<$3) OR (accepted_at,id)<($3::timestamptz,$4::uuid)) ORDER BY accepted_at DESC,id DESC LIMIT 100',
+            [v.id, found.guest_id, at, id],
+          )
+        ).rows;
+        return json({
+          orders: await Promise.all(
+            rows.map(async (r) => guestOrder(await orderDetail(pool, r.id, v.id))),
+          ),
+          nextCursor: rows.length === 100 ? rows[99].paginationTime + "|" + rows[99].id : null,
+        });
       }
       if (path === "/dine-in/orders" && method === "POST") {
         const context = await getOwner(request);
         const result = await checkout(context.owner, await body(request));
-        const publicOrder=guestOrder(result.order,result.receiptToken);
+        const publicOrder = guestOrder(result.order, result.receiptToken);
         return json({ ...result, order: publicOrder }, result.replayed ? 200 : 201);
       }
       const orderMatch = /^\/dine-in\/orders\/([a-f0-9-]{36})$/.exec(path);
@@ -219,7 +243,8 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         uuid.parse(orderMatch[1]);
         const found = await session(request),
           anon = readCookie(request, "__Host-hostess-dining");
-        const receipt = request.headers.get("x-hostess-receipt-token") ?? url.searchParams.get("receiptToken");
+        const receipt =
+          request.headers.get("x-hostess-receipt-token") ?? url.searchParams.get("receiptToken");
         if (receipt && !/^[A-Za-z0-9_-]{43}$/.test(receipt))
           throw new ApiError(404, "NOT_FOUND", "Заказ не найден");
         const ownerHash = found?.guest_id
@@ -236,7 +261,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         if (!record) throw new ApiError(404, "NOT_FOUND", "Заказ не найден");
         const order = await orderDetail(pool, record.id, record.venue_id);
         // Receipts are scoped capabilities; do not leak linked guest PII or internal staff history.
-        const publicOrder=guestOrder(order);
+        const publicOrder = guestOrder(order);
         return json({ order: publicOrder });
       }
       if ((path === "/loyalty/wallet" || path === "/loyalty/transactions") && method === "GET") {
@@ -249,10 +274,13 @@ export async function handleDiningApi(request: Request): Promise<Response | null
           await transaction(async (client) => {
             await loyaltyLock(client);
             const v = await venue(client, url.searchParams.get("venue") ?? "xoxo");
-            if(path.endsWith("wallet"))return await walletView(client,v.id,found.guest_id!);
-            const transactions=await ledger(client,v.id,found.guest_id!,before);
-            const last=transactions[transactions.length-1];
-            return {transactions,nextCursor:transactions.length===200?last.paginationTime+"|"+last.id:null};
+            if (path.endsWith("wallet")) return await walletView(client, v.id, found.guest_id!);
+            const transactions = await ledger(client, v.id, found.guest_id!, before);
+            const last = transactions[transactions.length - 1];
+            return {
+              transactions,
+              nextCursor: transactions.length === 200 ? last.paginationTime + "|" + last.id : null,
+            };
           }),
         );
       }

@@ -20,7 +20,18 @@ export const quoteInput = z
   .refine(
     (v) => new Set(v.items.map((i) => i.productId)).size === v.items.length,
     "Duplicate products",
-  ).refine(v=>v.redeemMinor===undefined || v.redeemAmount===undefined,"Use one redemption unit").transform(v=>({...v,redeemMinor:v.redeemAmount===undefined?(v.redeemMinor??0):toMinor(v.redeemAmount,100_000_000_000)}));
+  )
+  .refine(
+    (v) => v.redeemMinor === undefined || v.redeemAmount === undefined,
+    "Use one redemption unit",
+  )
+  .transform((v) => ({
+    ...v,
+    redeemMinor:
+      v.redeemAmount === undefined
+        ? (v.redeemMinor ?? 0)
+        : toMinor(v.redeemAmount, 100_000_000_000),
+  }));
 export const orderInput = z
   .object({ quoteId: z.string().uuid(), idempotencyKey: z.string().min(16).max(128) })
   .strict();
@@ -43,7 +54,7 @@ export function assertTransition(from: OrderStatus, to: OrderStatus) {
   )
     throw new ApiError(409, "INVALID_TRANSITION", "Недопустимый переход статуса");
 }
-export function toMinor(value: number | string, maximum=1_000_000_000) {
+export function toMinor(value: number | string, maximum = 1_000_000_000) {
   const text = String(value);
   if (!/^\d+(\.\d{1,2})?$/.test(text))
     throw new ApiError(503, "INVALID_PRICE", "Некорректная цена биржи");
