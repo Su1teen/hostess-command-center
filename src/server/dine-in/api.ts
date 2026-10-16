@@ -57,8 +57,11 @@ export async function listQr(venueId: string) {
   const tables = (
     await pool.query(
       `SELECT q.id,q.resource_id AS "resourceId",q.token,q.enabled,q.generation,q.issued_at AS "issuedAt",q.rotated_at AS "rotatedAt",
-    r.code,r.name,r.zone_id AS "zoneId",z.name AS "zoneName" FROM table_qr_codes q JOIN venue_resources r ON r.id=q.resource_id
-    JOIN venue_zones z ON z.id=r.zone_id WHERE q.venue_id=$1 ORDER BY r.code`,
+    r.code,r.name,r.zone_id AS "zoneId",z.name AS "zoneName",m.legacy_code AS "legacyCode",
+    (m.verified_at IS NOT NULL) AS "mappingVerified",r.is_reservable AS "bookable"
+    FROM table_qr_codes q JOIN venue_resources r ON r.id=q.resource_id
+    JOIN venue_zones z ON z.id=r.zone_id LEFT JOIN venue_resource_mappings m ON m.resource_id=r.id
+    WHERE q.venue_id=$1 ORDER BY r.code`,
       [venueId],
     )
   ).rows;
@@ -170,7 +173,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
       (/^\/guests\/[a-f0-9-]{36}$/.test(path) && method === "PATCH"));
   if (!newPath && !guestWrite) return null;
   try {
-    if (process.env.DINE_IN_ENABLED !== "yes")
+    if (!guestWrite && process.env.DINE_IN_ENABLED !== "yes")
       throw new ApiError(503, "DINE_IN_DISABLED", "QR-заказы пока не включены");
     if (isGuest) {
       if (serviceActor(request) !== "bff")
@@ -327,6 +330,41 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         await transaction(async (client) => {
           await client.query("SELECT hostess_bootstrap_qr()");
           await audit(client, staff, "qr_bootstrap", v.id);
+        });
+        return json({ tables: await listQr(v.id) });
+      }
+      const mapping = /^\/tables\/([a-f0-9-]{36})\/mapping$/.exec(path);
+      if (mapping && method === "PATCH") {
+        const id = uuid.parse(mapping[1]);
+        const input = z
+          .object({
+            legacyCode: z
+              .enum(["A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2", "Bar"])
+              .nullable(),
+            verified: z.boolean(),
+            reason: z.string().trim().min(3).max(500),
+          })
+          .strict()
+          .refine((x) => x.verified || x.legacyCode === null)
+          .parse(await body(request));
+        await transaction(async (client) => {
+          await client.query("SELECT pg_advisory_xact_lock(728411001)");
+          if (
+            !(
+              await client.query(
+                "SELECT id FROM table_qr_codes WHERE resource_id=$1 AND venue_id=$2",
+                [id, v.id],
+              )
+            ).rowCount
+          )
+            throw new ApiError(404, "NOT_FOUND", "Стол не найден");
+          await client.query(
+            `INSERT INTO venue_resource_mappings(resource_id,venue_id,legacy_code,verified_at,verified_by,note)
+            VALUES($1,$2,$3,CASE WHEN $4 THEN now() ELSE NULL END,CASE WHEN $4 THEN $5 ELSE NULL END,$6)
+            ON CONFLICT(resource_id) DO UPDATE SET legacy_code=EXCLUDED.legacy_code,verified_at=EXCLUDED.verified_at,verified_by=EXCLUDED.verified_by,note=EXCLUDED.note`,
+            [id, v.id, input.legacyCode, input.verified, staff.staff_id, input.reason],
+          );
+          await audit(client, staff, "physical_mapping_updated", id, input);
         });
         return json({ tables: await listQr(v.id) });
       }

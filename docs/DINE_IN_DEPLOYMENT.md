@@ -6,7 +6,7 @@ Use the existing Railway project hostess / production / hostess-command-center a
 |---|---|
 | DATABASE_URL | existing Command Center PostgreSQL URL; preserve |
 | COMMAND_CENTER_ORIGIN | existing exact production origin; staff CSRF check |
-| HOSTESS_PUBLIC_ORIGIN | https://hostess.online |
+| HOSTESS_PUBLIC_ORIGIN | https://hostes.online |
 | EXCHANGE_API_ORIGIN | https://hostess-xoxo-production.up.railway.app |
 | HOSTESS_BFF_KEY | existing shared BFF credential, server-only; preserve |
 | WHATSAPP_SERVICE_KEY | existing WhatsApp credential; preserve |
@@ -36,3 +36,7 @@ npm run test:unit runs pure pricing/security/export tests.
 TEST_DATABASE_URL must be an isolated local PostgreSQL URL using username hostess_test.
 npm run test:integration creates and removes randomly named test schemas, runs the existing booking regression suite, dining integration suite and migration runner replay. It refuses non-local/non-test credentials.
 No test runner may use production DATABASE_URL or reset the production database.
+
+Migration 0007 adds explicit physical inventory mappings without assigning any real table or enabling reservations. Confirm the physical survey in `/tables/qr`; configure verified capacity and booking availability separately after review. Unknown legacy positions retain conservative blocking against normalized resources. Reconfiguration is rejected while future reservations or live holds exist. VIP1–VIP3 remain independent resources with their existing capacities.
+
+The Nitro startup plugin starts the outbox independently of lazy SSR/first HTTP traffic. Keep delivery disabled until the actual receiver is confirmed. The migration command now exits nonzero when DATABASE_URL is missing.

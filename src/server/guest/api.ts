@@ -116,7 +116,14 @@ async function availability(
       AND guest_id IS DISTINCT FROM $3::uuid AND starts_at<$2 AND ends_at>$1`,
     [startsAt, endsAt, guestId],
   );
-  const occupied = new Set(busy.rows.map((r) => r.id));
+  const occupied = new Set(
+    (
+      await pool.query(
+        "SELECT code FROM unnest($1::text[]) AS t(code) WHERE hostess_inventory_conflicts(ARRAY[code],$2::text[])",
+        [HALL_TABLES.map((t) => t.id), busy.rows.map((r) => r.id)],
+      )
+    ).rows.map((r) => r.code),
+  );
   const inventory = await listVenueAvailability(pool, startsAt, endsAt, guests, guestId);
   return {
     startsAt,

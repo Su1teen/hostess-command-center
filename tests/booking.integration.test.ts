@@ -64,6 +64,8 @@ beforeAll(async () => {
     "0003_guest_booking.sql",
     "0004_venue_inventory.sql",
     "0005_fix_normalized_resource_links.sql",
+    "0006_dine_in.sql",
+    "0007_physical_inventory_mapping.sql",
   ])
     await pool.query(
       readFileSync(new URL(`../src/server/db/migrations/${file}`, import.meta.url), "utf8"),
@@ -326,6 +328,7 @@ describe("WhatsApp magic links", () => {
     expect(a.data.guestId).toBe(b.data.guestId);
     const link = await api("/links", { guestId: a.data.guestId }, wa);
     expect(link.status).toBe(200);
+    expect(new URL(link.data.url).origin).toBe("https://hostes.online");
     const token = new URL(link.data.url).hash.slice("#token=".length);
     expect(new URL(link.data.url).search).toBe("");
     const stored = (

@@ -7,8 +7,8 @@ const { Pool } = pg;
 const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
-  console.warn("[migrate] DATABASE_URL is not set; skipping migrations.");
-  process.exit(0);
+  console.error("[migrate] DATABASE_URL is required; refusing to skip migrations.");
+  process.exit(1);
 }
 
 const connectionString = new URL(databaseUrl);

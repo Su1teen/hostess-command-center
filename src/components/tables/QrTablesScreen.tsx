@@ -87,7 +87,7 @@ export function QrTablesScreen() {
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {query.data?.tables.map((t) => (
           <article
-            key={`${t.id}:${t.generation}:${t.enabled}:${t.zoneId}:${t.name}`}
+            key={`${t.id}:${t.generation}:${t.enabled}:${t.zoneId}:${t.name}:${t.mappingVerified}:${t.legacyCode}`}
             className="rounded-2xl border bg-white p-5"
           >
             <div className="flex items-center justify-between">
@@ -99,6 +99,12 @@ export function QrTablesScreen() {
               </span>
             </div>
             <p className="mt-1 text-sm text-slate-500">{t.zoneName}</p>
+            <p className="mt-1 text-sm text-amber-700">
+              {t.mappingVerified
+                ? `Расположение подтверждено: ${t.legacyCode ?? "отдельный стол"}`
+                : "Расположение не подтверждено"}
+              {t.bookable ? " · Бронирование доступно" : " · Бронирование выключено"}
+            </p>
             <img
               className="mx-auto my-3 aspect-square w-44"
               src={`/api/staff/v1/tables/${t.resourceId}/qr.svg?v=${t.generation}`}
@@ -181,6 +187,59 @@ export function QrTablesScreen() {
                 </label>
                 <button disabled={mutation.isPending} className={controlClass}>
                   Сохранить
+                </button>
+              </form>
+            )}
+            {manager && (
+              <form
+                className="mt-4 space-y-3 border-t pt-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const f = new FormData(e.currentTarget);
+                  mutation.mutate({
+                    path: `/tables/${t.resourceId}/mapping`,
+                    method: "PATCH",
+                    data: {
+                      legacyCode: f.get("legacyCode") || null,
+                      verified: f.get("verified") === "on",
+                      reason: f.get("reason"),
+                    },
+                  });
+                }}
+              >
+                <label className="block text-xs">
+                  Старое обозначение
+                  <select
+                    name="legacyCode"
+                    defaultValue={t.legacyCode ?? ""}
+                    className={`${controlClass} mt-1 w-full`}
+                  >
+                    <option value="">Отдельный стол / не назначено</option>
+                    {["A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2", "Bar"].map((c) => (
+                      <option key={c}>{c}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex min-h-11 items-center gap-2 text-sm">
+                  <input type="checkbox" name="verified" defaultChecked={t.mappingVerified} />
+                  Физически проверено владельцем
+                </label>
+                <label className="block text-xs">
+                  Основание проверки
+                  <input
+                    name="reason"
+                    required
+                    minLength={3}
+                    maxLength={500}
+                    className={`${controlClass} mt-1 w-full`}
+                  />
+                </label>
+                <p className="text-xs text-slate-500">
+                  Привязка не включает бронирование. Менять её можно только при отсутствии будущих
+                  броней и активных удержаний.
+                </p>
+                <button disabled={mutation.isPending} className={controlClass}>
+                  Сохранить привязку
                 </button>
               </form>
             )}

@@ -27,7 +27,7 @@ const env = {
   PORT: "3000",
   HOST: "127.0.0.1",
   COMMAND_CENTER_ORIGIN: "http://localhost:3000",
-  HOSTESS_PUBLIC_ORIGIN: "https://hostess.online",
+  HOSTESS_PUBLIC_ORIGIN: "https://hostes.online",
   EXCHANGE_API_ORIGIN: "https://127.0.0.1:19092",
   EXCHANGE_DATA_MODE: "api",
   HOSTESS_BFF_KEY: key,
@@ -72,6 +72,17 @@ const exchange = createServer(
   },
   (req, res) => {
     res.setHeader("content-type", "application/json");
+    if (req.url === "/api/v1/command-center/order-events") {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        const event = JSON.parse(body);
+        res.end(JSON.stringify({ accepted: true, eventId: event.eventId }));
+      });
+      return;
+    }
     res.end(
       JSON.stringify({
         status: "ok",
@@ -199,14 +210,26 @@ try {
     ).rowCount === 1,
     "Bootstrap changed token",
   );
-  await page.locator("article").first().getByRole("checkbox").uncheck();
+  const firstPanel = page.locator("article").first();
+  await firstPanel.getByLabel("Физически проверено владельцем").check();
+  await firstPanel.getByLabel("Основание проверки").fill("Isolated browser fixture survey");
+  await firstPanel.getByRole("button", { name: "Сохранить привязку", exact: true }).click();
+  await firstPanel
+    .getByText("Расположение подтверждено: отдельный стол", { exact: false })
+    .waitFor();
+  console.log("PASS manager physical mapping form keeps booking disabled");
+  await page
+    .locator("article")
+    .first()
+    .getByRole("checkbox", { name: "Принимать заказы" })
+    .uncheck();
   await page
     .locator("article")
     .first()
     .getByRole("button", { name: "Сохранить", exact: true })
     .click();
   await page.locator("article").first().getByText("Отключён", { exact: true }).waitFor();
-  await page.locator("article").first().getByRole("checkbox").check();
+  await page.locator("article").first().getByRole("checkbox", { name: "Принимать заказы" }).check();
   await page
     .locator("article")
     .first()
@@ -242,6 +265,29 @@ try {
   console.log(
     "PASS 17 QR panels, SVG/PNG/ZIP downloads, bootstrap, enabled state, rotation and print PDF",
   );
+  // Restart with persisted backlog and no incoming HTTP request: the worker must start itself.
+  const previousApp = app;
+  await new Promise((resolve) => {
+    previousApp.once("exit", resolve);
+    previousApp.kill();
+  });
+  app = spawn(process.execPath, ["scripts/start.mjs"], {
+    env: { ...env, DINE_IN_OUTBOX_ENABLED: "yes", DINE_IN_OUTBOX_INTERVAL_MS: "1000" },
+    stdio: "inherit",
+  });
+  let recovered = false;
+  for (let i = 0; i < 40; i++) {
+    const result = await pool.query(
+      "SELECT count(*)::int AS n FROM " + schema + ".integration_outbox WHERE status='delivered'",
+    );
+    if (result.rows[0].n > 0) {
+      recovered = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  assert(recovered, "Outbox did not recover persisted backlog at startup without HTTP traffic");
+  console.log("PASS outbox restart recovers persisted backlog without incoming HTTP traffic");
   await browser.close();
   browser = undefined;
 } finally {
