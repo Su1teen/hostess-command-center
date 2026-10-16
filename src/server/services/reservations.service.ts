@@ -163,7 +163,7 @@ export async function createReservation(
       message: "Время окончания должно быть позже начала",
     };
   const table = findTable(input.tableId);
-  let resourceId = input.resourceId;
+  const resourceId = input.resourceId;
   let resourceName: string | null = null;
   let tableId = input.tableId ?? "";
   let tableLabel: string | null = table?.label ?? null;

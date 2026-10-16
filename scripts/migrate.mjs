@@ -28,6 +28,7 @@ try {
         applied_at timestamptz not null default now()
       )
     `);
+    await client.query("SELECT pg_advisory_lock(728411000)");
 
     const migrationsDir = join(
       dirname(fileURLToPath(import.meta.url)),
@@ -39,9 +40,13 @@ try {
 
     for (const file of files) {
       if (appliedNames.has(file)) continue;
-      if (file >= "0003_guest_booking.sql" && process.env.ALLOW_GUEST_BOOKING_MIGRATION !== "yes") {
-        console.warn("[migrate] guest booking migration requires explicit opt-in; not applied");
-        continue;
+      if (
+        ["0003_guest_booking.sql", "0004_venue_inventory.sql"].includes(file) &&
+        process.env.ALLOW_GUEST_BOOKING_MIGRATION !== "yes"
+      ) {
+        throw new Error(
+          `[migrate] ${file} is pending. Set ALLOW_GUEST_BOOKING_MIGRATION=yes after schema review. Refusing to silently skip prerequisites.`,
+        );
       }
       const sql = await readFile(join(migrationsDir, file), "utf8");
       await client.query("BEGIN");
@@ -56,6 +61,7 @@ try {
       console.log(`[migrate] applied ${file}`);
     }
   } finally {
+    await client.query("SELECT pg_advisory_unlock(728411000)");
     client.release();
   }
 } catch (error) {
