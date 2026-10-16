@@ -17,7 +17,7 @@ PASS означает наблюдаемое подтверждение в ук�
 | Область | Статус | Подтверждение и граница |
 |---|---|---|
 | Фактический main и QR merge | PASS | HEAD и origin/main исходно совпадали с 8fdac23 |
-| Production migration ledger и 12 dining-таблиц | PASS | READ ONLY SQL: 0001–0006, все 12 объектов |
+| Production migration ledger и 12 dining-таблиц | PASS | READ ONLY SQL: исходные 0001–0006 и все 12 объектов; после deploy также 0007 и 17 mapping-строк |
 | Production loyalty | PASS | cashback_bps=300, lifetime_days=14, redeem_limit_bps=10000 |
 | Production QR 01–17 | PASS | 17 записей, 17 resource IDs, 17 уникальных токенов, enabled=17, wrong_venue=0 |
 | Физический инвентарь | FIXED | Добавлены явные проверяемые mapping, manager UI и общая SQL-проверка занятости |
@@ -67,7 +67,7 @@ PASS означает наблюдаемое подтверждение в ук�
 | DINE_IN_OUTBOX_ENABLED | no, сохранено |
 | DINE_IN_OUTBOX_INTERVAL_MS | 5000 |
 | HOSTESS_PUBLIC_ORIGIN до исправления | https://hostess.sultansovetov2003.workers.dev |
-| HOSTESS_PUBLIC_ORIGIN после исправления | https://hostes.online; сохранено skipDeploys=true, применяется следующим deploy |
+| HOSTESS_PUBLIC_ORIGIN после исправления | https://hostes.online; применено успешным deployment a2902369, повторно прочитано после deploy |
 | COMMAND_CENTER_ORIGIN | https://hostess-command-center-production.up.railway.app; совпадает с доменом сервиса |
 | EXCHANGE_API_ORIGIN | https://hostess-xoxo-production.up.railway.app |
 | HOSTESS_BFF_KEY / WHATSAPP_SERVICE_KEY / COMMAND_CENTER_SERVICE_KEY | присутствуют, длина не менее 32; значения не раскрывались |
@@ -96,7 +96,7 @@ PASS означает наблюдаемое подтверждение в ук�
 | Vite production build / npm run build | PASS, client + SSR + Nitro |
 | `bun test tests/dine-in.unit.test.ts` | 29 PASS |
 | `tests/booking.integration.test.ts` на локальной PostgreSQL | 31 PASS после применения 0001–0007 |
-| `tests/dine-in.integration.test.ts` на локальной PostgreSQL | 35 PASS под Node/Vitest, с реальными sibling imports |
+| `tests/dine-in.integration.test.ts` на локальной PostgreSQL | 35 PASS под Node/Vitest, с реальными sibling imports; Linux CI: 34 PASS, 1 explicit sibling skip |
 | `scripts/test-integration.mjs`: clean/replay migrations | PASS, 0001–0007, 17 неизменных QR credentials |
 | Startup negative checks | PASS: missing DATABASE_URL и pending gated 0003 дают exit 1; 0004–0007 не пропускаются вперед |
 | `node scripts/test-ui.mjs` | PASS: mobile queue/state/reload/search, guest CRUD, mapping form, 17 SVG/PNG/ZIP/PDF, bootstrap/disable/enable/rotation, worker restart без HTTP |
@@ -106,16 +106,24 @@ PASS означает наблюдаемое подтверждение в ук�
 
 Локальная тестовая PostgreSQL работала только на 127.0.0.1:55439, пользователь hostess_test. Command Center использовал случайные schemas, XOXO — отдельную локальную qr_integration_test со своим актуальным generated Prisma client. Это не дополнительная production БД.
 
-Windows Bun 1.3.13 воспроизводимо зависал в idempotency test и pool teardown; канонический полный `npm run test:integration` на этой машине поэтому не объявлен успешным. Те же 35 test bodies выполнены под Node 24.19.0/Vitest 2.1.4 с alias bun:test→vitest. Unit и booking выполнялись также непосредственно Bun. Linux CI остается отдельным подтверждением канонического runner. Cross-repository test включается через HOSTESS_REPOSITORY и XOXO_REPOSITORY; без соседних копий он явно skipped.
+Windows Bun 1.3.13 воспроизводимо зависал в idempotency test и pool teardown; канонический полный `npm run test:integration` на этой машине поэтому не объявлен успешным. Те же 35 test bodies выполнены под Node 24.19.0/Vitest 2.1.4 с alias bun:test→vitest. Unit и booking выполнялись также непосредственно Bun. Канонический runner полностью прошел отдельно в Linux CI, включая browser E2E. Cross-repository test включается через HOSTESS_REPOSITORY и XOXO_REPOSITORY; без соседних копий он явно skipped.
 
 ## Оставшиеся действия владельца и безопасное включение
 
 1. **Cloudflare:** проверить Worker, обслуживающий именно https://hostes.online. Обеспечить runtime доступ к BOOKING_API_ORIGIN=https://hostess-command-center-production.up.railway.app и существующему HOSTESS_BFF_KEY; не создавать новый несовпадающий key. Проверить, что bindings доходят до Nitro/SSR. Повторить GET /api/guest/v1/dine-in/tables/:token и mobile refresh: требуется валидная карточка стола, не только HTML 200. Отдельный прямой диагностический backend-запрос с production-ключом был отклонен automatic approval review; вместо него применены public BFF probes и чтение журналов.
-2. **Railway:** дождаться нормального deploy main и применения только pending 0007. Проверить ledger, новый SHA, HOSTESS_PUBLIC_ORIGIN=https://hostes.online и сохранность всех 17 credentials. 0006 не запускать принудительно.
+2. **Railway:** нормальный deploy main и применение pending 0007 уже подтверждены; дальнейшие выкладки должны сохранять все 17 credentials. 0006 не запускать принудительно. Отправитель outbox оставить выключенным до шага 4.
 3. **Физический инвентарь:** владелец подтверждает зал/вместимость/legacy соответствия в `/tables/qr`. Не считать QR 01–17 вторым набором физических столов. Для подтвержденных ресурсов booking включать отдельно после обзора вместимости; VIP не перенумеровывать. Ограничение mapping-редактирования при будущих бронях требует согласованного окна, а не обхода SQL guard.
 4. **XOXO rollout:** оставить DINE_IN_OUTBOX_ENABLED=no. У receiver подтвердить текущие migrations, service-key equality, реальные HTTP ACK и durable deduplication; включить QR_ORDER_EVENTS_ENABLED=true. После read-only diagnostics enabled=true разрешить отправитель DINE_IN_OUTBOX_ENABLED=yes. Наблюдать pending/failed/terminal; перед manual retry устранить причину. Не менять eventId/orderItemId при повторах.
 5. После устранения BFF blocker согласовать обозначенную production-тестовую покупку с владельцем: anonymous/verified guest, 4770−1000/113, ручная оплата, WhatsApp, staff queue, outbox ACK. До этого live финансовая приемка — NOT VERIFIED. В этом аудите production заказов, бонусных начислений и платежных отметок не создавалось.
 
 ## Delivery evidence
 
-Этот раздел дополняется наблюдаемыми результатами push, CI и Railway deployment. Сам файл не встраивает собственный будущий commit hash; SHA исправлений указан выше, полный отчет доступен в main.
+В main отправлены коммит исправлений 7481319 и отчет c2aeab1. Полный проверенный SHA deployment: `c2aeab1b2943fc0ff755631b846d60f4fdae6510`.
+
+- [GitHub Actions 38979720280](https://github.com/Su1teen/hostess-command-center/actions/runs/38979720280): SUCCESS. Все шаги typecheck/lint/build/unit/integration/browser завершились успешно. Unit=29; booking=31; dining=34 PASS + 1 explicit cross-repository skip; настоящий cross-repository тест отдельно прошел локально в числе 35.
+- Railway deployment `a2902369-abf6-492a-95af-d6f407ee84b7`: SUCCESS, опубликован `2026-10-16T23:09:06Z` (17 октября 04:09 UTC+05). Start log подтверждает прослушивание 8080; pre-deploy log содержит `[migrate] applied 0007_physical_inventory_mapping.sql`.
+- Повторный READ ONLY снимок `2026-10-16T23:09:28.755Z`: ledger заканчивается 0007; время ledger 0006 осталось прежним. Mapping=17, все 17 unverified. QR=17, enabled=17, reservable=0, unassigned=17, tenant mismatch=0. Агрегированный отпечаток resource IDs + credentials **точно совпадает** с контрольным снимком до deploy: QR-токены не перевыпускались.
+- Повторно прочитано HOSTESS_PUBLIC_ORIGIN=https://hostes.online; DINE_IN_ENABLED=yes, pilot=yes, outbox=no, interval=5000; shared DB и равенство CC/XOXO ключей сохранены. Outbox остается пустым, orphan counts=0.
+- Публичный BFF blocker Cloudflare этим Railway deployment не устраняется: он расположен в соседнем frontend runtime. Полная live приемка остается BLOCKED/NOT VERIFIED согласно матрице.
+
+Финальная добавка этого раздела изменяет только документацию. Файл не встраивает собственный будущий commit hash; проверенный SHA кода и deployment приведен выше.
