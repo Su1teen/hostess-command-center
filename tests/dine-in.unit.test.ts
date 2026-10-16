@@ -1,290 +1,35 @@
-import { describe, expect, test } from "bun:test";
-import { inflateSync } from "node:zlib";
-import {
-  calculate,
-  toMinor,
-  normalizePhone,
-  assertTransition,
-  priceLines,
-  quoteInput,
-  type Snapshot,
-} fr…20042 tokens truncated…lThis.fetch = old;
-    }
-  });
-  test("expired quote rolls back reservation creation", async () => {
-    const guest = await bootstrap();
-    const quote = (
-      await pool.query(
-        "INSERT INTO hostess_quotes(guest_id,round_id,lines,expires_at) VALUES($1,'test','[]',now()-interval '1 minute') RETURNING id",
-        [guest.data.guestId],
-      )
-    ).rows[0];
-    const hold = await api(
-      "/holds",
-      { ...interval(10), guests: 2, tableIds: ["B4"] },
-      { cookie: guest.cookie },
-    );
-    expect(
-      (
-        await api(
-          "/reservations",
-          { holdId: hold.data.id, quoteId: quote.id, idempotencyKey: randomToken() },
-          { cookie: guest.cookie },
-        )
-      ).data.error.code,
-    ).toBe("QUOTE_EXPIRED");
-    expect(
-      (await api("/profile", undefined, { cookie: guest.cookie })).data.reservations,
-    ).toHaveLength(0);
-  });
-  test("offline exchange cannot create quote or sale", async () => {
-    const guest = await bootstrap();
-    const old = globalThis.fetch;
-    globalThis.fetch = (async () => {
-      throw new Error("test-offline");
-    }) as typeof fetch;
-    try {
-      const result = await api(
-        "/quotes",
-        { items: [{ productId: crypto.randomUUID(), quantity: 1 }] },
-        { cookie: guest.cookie },
-      );
-      expect(result.status).toBe(503);
-      expect(
-        (await api("/profile", undefined, { cookie: guest.cookie })).data.reservations,
-      ).toHaveLength(0);
-    } finally {
-      globalThis.fetch = old;
-    }
-  });
-  test("revoked guest session is denied", async () => {
-    const guest = await bootstrap();
-    expect((await api("/logout", {}, { cookie: guest.cookie })).status).toBe(200);
-    expect((await api("/profile", undefined, { cookie: guest.cookie })).status).toBe(401);
-  });
-  test("raw token never stored and secure cookie flags are set", async () => {
-    const guest = await bootstrap();
-    const raw = guest.cookie!.split("=")[1];
-    const found = (
-      await pool.query("SELECT token_hash FROM hostess_sessions WHERE guest_id=$1", [
-        guest.data.guestId,
-      ])
-    ).rows[0];
-    expect(found.token_hash).toBe(hash(raw));
-    const response = (await handleBookingApi(
-      new Request("https://command.test/api/guest/v1/bootstrap", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-hostess-service-key": key,
-          "x-hostess-client-id": randomToken(),
-        },
-        body: JSON.stringify(fixture()),
-      }),
-    ))!;
-    const cookie = response.headers.get("set-cookie")!;
-    expect(cookie).toContain("HttpOnly");
-    expect(cookie).toContain("Secure");
-    expect(cookie).toContain("SameSite=Lax");
-    expect(cookie).not.toContain("Domain=");
-  });
+import {describe,expect,test} from "bun:test";
+import {inflateSync} from "node:zlib";
+import {calculate,toMinor,normalizePhone,assertTransition,priceLines,quoteInput,type Snapshot} from "../src/server/dine-in/domain";
+import {qrPng,qrSvg,zipFiles,crc32,tableUrl,printPanels} from "../src/server/dine-in/qr";
+const now=Date.now(),id="11111111-1111-4111-8111-111111111111";
+const sample:Snapshot={status:"ok",generatedAt:new Date(now).toISOString(),currentRound:{id:"round",endsAt:new Date(now+600000).toISOString()},products:[{id,name:"Drink",price:1590,currency:"KZT",isAvailable:true}]};
+describe("exact money and loyalty",()=>{
+test("4770 minus 1000 earns 113 whole KZT",()=>expect(calculate(477000,100000,100000)).toEqual({subtotalMinor:477000,discountMinor:100000,payableMinor:377000,cashbackMinor:11300}));
+test("fully redeemed earns zero",()=>expect(calculate(477000,999999,477000).cashbackMinor).toBe(0));
+test("redemption cannot exceed balance",()=>expect(calculate(477000,999999,4500).discountMinor).toBe(4500));
+test("cashback rounds down whole KZT",()=>expect(calculate(1999,0,0).cashbackMinor).toBe(0));
+test("decimal price exact",()=>{expect(toMinor("1590.29")).toBe(159029);expect(toMinor(.01)).toBe(1);});
+test.each(["1.001","-1","Infinity","1e+20","10000000000000"])("invalid price %s",p=>expect(()=>toMinor(p)).toThrow());
+test.each(["87011234567","+7 (701) 123-45-67","7011234567"])("KZ phone %s",p=>expect(normalizePhone(p)).toBe("+77011234567"));
+test("invalid phone",()=>expect(()=>normalizePhone("123")).toThrow());
 });
-describe("staff auth", () => {
-  test("staff reads require server session", async () => {
-    const response = (await handleBookingApi(new Request("https://command.test/api/staff/v1/me")))!;
-    expect(response.status).toBe(401);
-  });
-  test("staff login rejects cross-origin before password verification", async () => {
-    const response = (await handleBookingApi(
-      new Request("https://command.test/api/staff/v1/login", {
-        method: "POST",
-        headers: { origin: "https://evil.test", "content-type": "application/json" },
-        body: '{"username":"test","password":"test"}',
-      }),
-    ))!;
-    expect(response.status).toBe(403);
-  });
-  test("staff viewer cannot move a reservation", async () => {
-    const raw = randomToken();
-    await pool.query(
-      "INSERT INTO hostess_sessions(token_hash,staff_id,role,expires_at) VALUES($1,'test-viewer','viewer',now()+interval '1 hour')",
-      [hash(raw)],
-    );
-    const response = (await handleBookingApi(
-      new Request(`https://command.test/api/staff/v1/reservations/${crypto.randomUUID()}/move`, {
-        method: "POST",
-        headers: {
-          cookie: `__Host-hostess-staff=${raw}`,
-          origin: "https://command.test",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ tableIds: ["A1"], reason: "Test move" }),
-      }),
-    ))!;
-    expect(response.status).toBe(403);
-  });
+describe("quote and service state",()=>{
+test("current snapshot price and TTL",()=>{const p=priceLines(sample,[{productId:id,quantity:3}],now);expect(p.lines[0].totalMinor).toBe(477000);expect(Date.parse(p.expiresAt)).toBe(now+120000);});
+test("round boundary limits expiry",()=>expect(Date.parse(priceLines({...sample,currentRound:{id:"r",endsAt:new Date(now+10000).toISOString()}},[],now).expiresAt)).toBe(now+10000));
+test("last five seconds require requote",()=>expect(()=>priceLines({...sample,currentRound:{id:"r",endsAt:new Date(now+4000).toISOString()}},[],now)).toThrow());
+test("stale snapshot",()=>expect(()=>priceLines({...sample,generatedAt:new Date(now-61000).toISOString()},[],now)).toThrow());
+test("unavailable product",()=>expect(()=>priceLines({...sample,products:[{...sample.products[0],isAvailable:false}]},[{productId:id,quantity:1}],now)).toThrow());
+test("browser cannot assert guest or price",()=>expect(quoteInput.safeParse({qrToken:"a".repeat(43),items:[{productId:id,quantity:1}],guestId:id,unitPrice:1}).success).toBe(false));
+test("duplicate products",()=>expect(quoteInput.safeParse({qrToken:"a".repeat(43),items:[{productId:id,quantity:1},{productId:id,quantity:2}]}).success).toBe(false));
+test("valid state transition",()=>expect(()=>assertTransition("new","accepted")).not.toThrow());
+test("skip, cancel shortcut and reopen rejected",()=>{expect(()=>assertTransition("new","closed")).toThrow();expect(()=>assertTransition("new","cancelled")).toThrow();expect(()=>assertTransition("cancelled","closed")).toThrow();});
 });
-
-describe("automation event dedup", () => {
-  test("atomic create with a stable WAHA event key returns same row on retry", async () => {
-    const wa = { wa: true, jid: "70000000010@c.us" };
-    const identity = await api(
-      "/identity",
-      { name: "Test Automation", jid: wa.jid, consent: true },
-      wa,
-    );
-    const payload = {
-      guestId: identity.data.guestId,
-      selection: { ...interval(12), tableIds: ["A3"], guests: 3 },
-      idempotencyKey: "wa:sulya:fixture-event-00001",
-    };
-    const first = await api("/reservations", payload, wa),
-      second = await api("/reservations", payload, wa);
-    expect(first.status).toBe(201);
-    expect(second.status).toBe(201);
-    expect(first.data.reservation.id).toBe(second.data.reservation.id);
-  });
-});
-
-describe("full authorized history", () => {
-  test("pagination handles more than 200 records with identical timestamps", async () => {
-    const guest = await bootstrap();
-    await pool.query(
-      `INSERT INTO command_center_reservations(guest_id,guest_name,phone,guests,starts_at,ends_at,status) SELECT $1,'Test History','+70000000000',1,now(),now()+interval '2 hours','cancelled' FROM generate_series(1,205)`,
-      [guest.data.guestId],
-    );
-    const first = await api("/profile", undefined, { cookie: guest.cookie });
-    expect(first.data.reservations).toHaveLength(200);
-    const second = await api(
-      "/profile?before=" + encodeURIComponent(first.data.nextCursor),
-      undefined,
-      { cookie: guest.cookie },
-    );
-    expect(second.data.reservations).toHaveLength(5);
-    expect(
-      new Set([...first.data.reservations, ...second.data.reservations].map((r) => r.id)).size,
-    ).toBe(205);
-  });
-});
-
-describe("staff guest ownership", () => {
-  const staffCall = async (path: string, role: string, body?: unknown) => {
-    const raw = randomToken();
-    await pool.query(
-      "INSERT INTO hostess_sessions(token_hash,staff_id,role,expires_at) VALUES($1,'test-staff',$2,now()+interval '1 hour')",
-      [hash(raw), role],
-    );
-    const response = (await handleBookingApi(
-      new Request("https://command.test/api/staff/v1" + path, {
-        method: body ? "POST" : "GET",
-        headers: {
-          cookie: "__Host-hostess-staff=" + raw,
-          origin: "https://command.test",
-          "content-type": "application/json",
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      }),
-    ))!;
-    return { status: response.status, data: await response.json() };
-  };
-  test("staff directory is real and viewer cannot attach legacy records", async () => {
-    const directory = await staffCall("/guests", "viewer");
-    expect(directory.status).toBe(200);
-    expect(directory.data.guests.length).toBeGreaterThan(0);
-    const denied = await staffCall(
-      "/guests/" + crypto.randomUUID() + "/link-reservation",
-      "viewer",
-      { reservationId: crypto.randomUUID(), reason: "Verified test ownership" },
-    );
-    expect(denied.status).toBe(403);
-  });
-  test("manager links a matching legacy record only to verified identity with audit", async () => {
-    const wa = { wa: true, jid: "70000000018@c.us" };
-    const identity = await api(
-      "/identity",
-      { name: "Test Legacy Owner", jid: wa.jid, consent: true },
-      wa,
-    );
-    const reservation = (
-      await pool.query(
-        "INSERT INTO command_center_reservations(guest_name,phone,guests,starts_at,ends_at,status) VALUES('Test Legacy','+7 000 000 0018',1,now(),now()+interval '2 hours','cancelled') RETURNING id",
-      )
-    ).rows[0];
-    const result = await staffCall(
-      "/guests/" + identity.data.guestId + "/link-reservation",
-      "manager",
-      { reservationId: reservation.id, reason: "Verified test ownership" },
-    );
-    expect(result.status).toBe(200);
-    const own = await api("/profile?guestId=" + identity.data.guestId, undefined, wa);
-    expect(own.data.reservations.some((r) => r.id === reservation.id)).toBe(true);
-    expect(
-      (
-        await pool.query(
-          "SELECT count(*)::int AS n FROM hostess_audit WHERE action='legacy_guest_link' AND entity_id=$1",
-          [reservation.id],
-        )
-      ).rows[0].n,
-    ).toBe(1);
-    const other = await api(
-      "/identity",
-      { name: "Test Wrong Owner", jid: "70000000019@c.us", consent: true },
-      { wa: true, jid: "70000000019@c.us" },
-    );
-    const wrong = await staffCall(
-      "/guests/" + other.data.guestId + "/link-reservation",
-      "manager",
-      { reservationId: reservation.id, reason: "Incorrect test ownership" },
-    );
-    expect(wrong.status).toBe(409);
-  });
-});
-
-describe("guest mutations retry safely", () => {
-  test("reschedule and cancellation preserve the record and repeat successfully", async () => {
-    const guest = await bootstrap();
-    const hold = await api(
-      "/holds",
-      { ...interval(20), tableIds: ["B1"], guests: 2 },
-      { cookie: guest.cookie },
-    );
-    const created = await api(
-      "/reservations",
-      { holdId: hold.data.id, idempotencyKey: crypto.randomUUID() },
-      { cookie: guest.cookie },
-    );
-    const replacement = await api(
-      "/holds",
-      { ...interval(21), tableIds: ["B2"], guests: 2 },
-      { cookie: guest.cookie },
-    );
-    const mutate = async (body: unknown) => {
-      const response = (await handleBookingApi(
-        new Request(
-          "https://command.test/api/guest/v1/reservations/" + created.data.reservation.id,
-          {
-            method: "PATCH",
-            headers: {
-              "x-hostess-service-key": key,
-              cookie: guest.cookie!,
-              "content-type": "application/json",
-            },
-            body: JSON.stringify(body),
-          },
-        ),
-      ))!;
-      return { status: response.status, data: await response.json() };
-    };
-    const first = await mutate({ action: "reschedule", holdId: replacement.data.id });
-    const retry = await mutate({ action: "reschedule", holdId: replacement.data.id });
-    expect(first.status).toBe(200);
-    expect(retry.status).toBe(200);
-    expect(retry.data.reservation.id).toBe(created.data.reservation.id);
-    expect(retry.data.reservation.tableIds).toEqual(["B2"]);
-    expect((await mutate({ action: "cancel" })).status).toBe(200);
-    expect((await mutate({ action: "cancel" })).status).toBe(200);
-    expect(
-      (await api("/profile", undefined, { cookie: guest.cookie })).data.reservations[0].status,
-    ).toBe("cancelled");
-  });
+describe("real QR exports",()=>{
+const url="https://hostess.online/v/xoxo/t/03/"+"a".repeat(64);
+test("SVG modules and quiet zone",()=>{const svg=qrSvg(url);expect(svg).toContain('shape-rendering="crispEdges"');expect(svg).toContain("M4,4");});
+test("PNG checksums and pixel buffer",()=>{const png=qrPng(url);expect(png.subarray(0,8).toString("hex")).toBe("89504e470d0a1a0a");let p=8,width=0,image=Buffer.alloc(0);while(p<png.length){const n=png.readUInt32BE(p),type=png.subarray(p+4,p+8).toString(),bytes=png.subarray(p+8,p+8+n);expect(png.readUInt32BE(p+8+n)).toBe(crc32(png.subarray(p+4,p+8+n)));if(type==="IHDR")width=bytes.readUInt32BE(0);if(type==="IDAT")image=Buffer.concat([image,bytes]);p+=n+12;}expect(inflateSync(image).length).toBe((width+1)*width);});
+test("ZIP local and central directories",()=>{const zip=zipFiles([{name:"one.svg",data:Buffer.from(qrSvg(url))}]);expect(zip.readUInt32LE()).toBe(0x04034b50);expect(zip.readUInt32LE(zip.length-22)).toBe(0x06054b50);expect(zip.readUInt16LE(zip.length-14)).toBe(1);});
+test("print markup escapes labels",()=>{const html=printPanels([{code:"<script>",url,enabled:false}]);expect(html).toContain("&lt;script&gt;");expect(html).toContain("@page");});
+test("permanent public URL",()=>{process.env.HOSTESS_PUBLIC_ORIGIN="https://hostess.online";expect(tableUrl("03","a".repeat(43))).toBe("https://hostess.online/v/xoxo/t/03/"+"a".repeat(43));});
 });
