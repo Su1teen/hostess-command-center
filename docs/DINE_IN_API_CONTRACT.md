@@ -27,6 +27,7 @@ Staff endpoints use existing __Host-hostess-staff. Every write requires Origin m
 |---|---|---|
 | GET | /dine-in/orders?status=&q=&before=ISO | Latest 100 orders, new first; orders,outbox,asOf,limit |
 | GET | /dine-in/orders/:id | order including guest context and events |
+| POST | /dine-in/outbox/retry | manager; {reason}; requeue failed/terminal events after fixing the cause |
 | PATCH | /dine-in/orders/:id/status | operator/manager; {status? ,manualPaymentReceived?:true}; sequential service transitions only |
 | POST | /dine-in/orders/:id/cancel | manager; {reason} 3–500 chars; idempotent cancellation |
 | POST | /dine-in/orders/:id/guest | operator/manager; {guestId}; only an unlinked order; no retroactive cashback |

@@ -234,7 +234,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         const found = await session(request);
         if (!found?.guest_id)
           throw new ApiError(401, "SESSION_REQUIRED", "Войдите для просмотра бонусов");
-        const before = url.searchParams.get("before");
+        const before = url.searchParams.get("before") || null;
         if (before) z.string().datetime().parse(before);
         return json(
           await transaction(async (client) => {
@@ -252,6 +252,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
           /\/qr\/rotate$/.test(path) ||
           /\/cancel$/.test(path) ||
           path === "/tables/qr/bootstrap" ||
+          path === "/dine-in/outbox/retry" ||
           (method === "PATCH" && path.startsWith("/tables/"));
       const staff = await staffAuth(request, write, isSensitive),
         v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
@@ -263,6 +264,13 @@ export async function handleDiningApi(request: Request): Promise<Response | null
       if (loyaltyMatch && method === "GET") {
         uuid.parse(loyaltyMatch[1]);
         return json(await guestDiningSummary(loyaltyMatch[1], v.slug));
+      }
+      if (path === "/dine-in/outbox/retry" && method === "POST") {
+        const input=z.object({reason:z.string().trim().min(3).max(300)}).strict().parse(await body(request));
+        const retried=await transaction(async client=>{
+          const result=await client.query("UPDATE integration_outbox SET terminal=false,next_attempt_at=now(),last_error=NULL WHERE venue_id=$1 AND status='failed' RETURNING id",[v.id]);
+          await audit(client,staff,"outbox_retry",v.id,{reason:input.reason,count:result.rowCount});return result.rowCount;
+        });return json({retried});
       }
       if (path === "/tables/qr/bootstrap" && method === "POST") {
         if (v.slug !== "xoxo")
@@ -396,13 +404,13 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         return json({ tables: await listQr(v.id) });
       }
       if (path === "/dine-in/orders" && method === "GET") {
-        const status = url.searchParams.get("status");
+        const status = url.searchParams.get("status") || null;
         if (status) z.enum(statusNames).parse(status);
         const q = z
           .string()
           .max(100)
           .parse(url.searchParams.get("q") ?? "");
-        const before = url.searchParams.get("before");
+        const before = url.searchParams.get("before") || null;
         if (before) z.string().datetime().parse(before);
         const rows = (
           await pool.query(
