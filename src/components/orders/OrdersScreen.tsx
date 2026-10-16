@@ -219,7 +219,21 @@ export function OrdersScreen() {
           {list.data?.outbox.some((r) => r.status === "failed") && (
             <p className="text-xs text-amber-700">
               Биржа: есть события с повторной доставкой. Заказы сохранены.
-              {role === "manager" && <button disabled={mutation.isPending} className={controlClass} onClick={() => mutation.mutate({path:"/dine-in/outbox/retry",method:"POST",data:{reason:"Повторная доставка менеджером"}})}>Повторить доставку</button>}
+              {role === "manager" && (
+                <button
+                  disabled={mutation.isPending}
+                  className={controlClass}
+                  onClick={() =>
+                    mutation.mutate({
+                      path: "/dine-in/outbox/retry",
+                      method: "POST",
+                      data: { reason: "Повторная доставка менеджером" },
+                    })
+                  }
+                >
+                  Повторить доставку
+                </button>
+              )}
             </p>
           )}
         </div>

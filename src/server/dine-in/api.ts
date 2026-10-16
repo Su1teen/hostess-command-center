@@ -266,11 +266,22 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         return json(await guestDiningSummary(loyaltyMatch[1], v.slug));
       }
       if (path === "/dine-in/outbox/retry" && method === "POST") {
-        const input=z.object({reason:z.string().trim().min(3).max(300)}).strict().parse(await body(request));
-        const retried=await transaction(async client=>{
-          const result=await client.query("UPDATE integration_outbox SET terminal=false,next_attempt_at=now(),last_error=NULL WHERE venue_id=$1 AND status='failed' RETURNING id",[v.id]);
-          await audit(client,staff,"outbox_retry",v.id,{reason:input.reason,count:result.rowCount});return result.rowCount;
-        });return json({retried});
+        const input = z
+          .object({ reason: z.string().trim().min(3).max(300) })
+          .strict()
+          .parse(await body(request));
+        const retried = await transaction(async (client) => {
+          const result = await client.query(
+            "UPDATE integration_outbox SET terminal=false,next_attempt_at=now(),last_error=NULL WHERE venue_id=$1 AND status='failed' RETURNING id",
+            [v.id],
+          );
+          await audit(client, staff, "outbox_retry", v.id, {
+            reason: input.reason,
+            count: result.rowCount,
+          });
+          return result.rowCount;
+        });
+        return json({ retried });
       }
       if (path === "/tables/qr/bootstrap" && method === "POST") {
         if (v.slug !== "xoxo")
