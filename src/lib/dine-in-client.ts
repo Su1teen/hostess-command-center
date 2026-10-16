@@ -78,6 +78,9 @@ export type QrTable = {
   url: string;
   enabled: boolean;
   generation: number;
+  legacyCode: string | null;
+  mappingVerified: boolean;
+  bookable: boolean;
 };
 export const controlClass =
   "min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm disabled:opacity-40";

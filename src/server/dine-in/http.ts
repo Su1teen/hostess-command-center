@@ -41,6 +41,17 @@ export function failure(error: unknown) {
   if (error instanceof z.ZodError)
     return json({ error: { code: "INVALID_INPUT", message: "Проверьте поля запроса" } }, 422);
   const code = (error as { code?: string })?.code;
+  if (code === "23P01")
+    return json(
+      {
+        error: {
+          code: "CONFLICT",
+          message:
+            "Есть пересекающиеся брони или удержания. Измените время или завершите текущие операции.",
+        },
+      },
+      409,
+    );
   if (code === "23505")
     return json({ error: { code: "CONFLICT", message: "Запись уже существует" } }, 409);
   if (code === "23503" || code === "23514")

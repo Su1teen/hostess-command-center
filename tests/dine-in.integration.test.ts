@@ -10,6 +10,8 @@ const consumer = process.env.HOSTESS_CONSUMER_ROOT
   : consumerFixture;
 const { tableSchema, quoteSchema, orderSchema, walletSchema, transactionSchema } = consumer;
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { pool } from "../src/server/db/pool";
 import { transaction, newSession } from "../src/server/guest/auth";
@@ -37,7 +39,8 @@ let table: { token: string; resource_id: string },
   seconds = 600,
   outboxFail = false;
 let invalidAck = false,
-  permanentFailure = false;
+  permanentFailure = false,
+  retryStatus = 0;
 const staff: Record<string, string> = {},
   delivered: string[] = [];
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -73,7 +76,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     delivered.push(payload.eventId);
     return Response.json(
       { accepted: !outboxFail && !invalidAck, eventId: payload.eventId },
-      { status: permanentFailure ? 400 : outboxFail ? 503 : 200 },
+      { status: retryStatus || (permanentFailure ? 400 : outboxFail ? 503 : 200) },
     );
   }
   return originalFetch(input, init);
@@ -163,6 +166,12 @@ beforeAll(async () => {
     readFileSync(new URL("../src/server/db/migrations/0006_dine_in.sql", import.meta.url), "utf8"),
   );
   table = (await pool.query("SELECT * FROM table_qr_codes LIMIT 1")).rows[0];
+  await pool.query(
+    readFileSync(
+      new URL("../src/server/db/migrations/0007_physical_inventory_mapping.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   venueId = (await pool.query("SELECT id FROM hostess_venues WHERE slug='xoxo'")).rows[0].id;
   for (const role of ["viewer", "operator", "manager"])
     staff[role] = (await transaction((c) => newSession(c, null, role, role))).split(";")[0];
@@ -303,8 +312,9 @@ test("parallel repeat submit creates one order, one earn; key scope enforced", a
       )
     ).rows[0].n,
   ).toBe(1);
+  const conflictingQuote = await quote(g.owner);
   await expect(
-    checkout(g.owner, { quoteId: (await quote(g.owner)).id, idempotencyKey: input.idempotencyKey }),
+    checkout(g.owner, { quoteId: conflictingQuote.id, idempotencyKey: input.idempotencyKey }),
   ).rejects.toMatchObject({ code: "IDEMPOTENCY_MISMATCH" });
 });
 test("expired quote requires requote; foreign owner cannot consume", async () => {
@@ -753,4 +763,276 @@ test("actual Hostess frontend schema accepts table, quote, order, receipt, walle
     await api("/api/guest/v1/dine-in/orders", undefined, { cookie: g.cookie })
   ).json();
   expect(history.orders.some((item: unknown) => orderSchema.parse(item).id === o.id)).toBe(true);
+});
+
+test("staff CRM writes preserve authorization with QR feature disabled", async () => {
+  process.env.DINE_IN_ENABLED = "no";
+  try {
+    const data = { name: "CRM without QR", phone: "+77017778890" };
+    expect((await api("/api/staff/v1/guests", data)).status).toBe(401);
+    expect((await api("/api/staff/v1/guests", data, { cookie: staff.viewer })).status).toBe(403);
+    expect(
+      (
+        await api("/api/staff/v1/guests", data, {
+          cookie: staff.operator,
+          origin: "https://foreign.test",
+        })
+      ).status,
+    ).toBe(403);
+    const created = await api("/api/staff/v1/guests", data, { cookie: staff.operator });
+    expect(created.status).toBe(201);
+    const id = (await created.json()).guest.id;
+    expect(
+      (
+        await api(
+          "/api/staff/v1/guests/" + id,
+          { ...data, name: "Edited without QR" },
+          { method: "PATCH", cookie: staff.operator },
+        )
+      ).status,
+    ).toBe(200);
+    expect((await api("/api/guest/v1/dine-in/tables/" + table.token)).status).toBe(503);
+  } finally {
+    process.env.DINE_IN_ENABLED = "yes";
+  }
+});
+
+test("dining session closes only after every order finishes and next visit is separate", async () => {
+  const a = await submit(anon()),
+    b = await submit(anon());
+  const sessionId = async (id: string) =>
+    (await pool.query("SELECT dining_session_id AS id FROM dine_in_orders WHERE id=$1", [id]))
+      .rows[0].id;
+  const first = await sessionId(a.order.id);
+  expect(await sessionId(b.order.id)).toBe(first);
+  const open = (
+    await pool.query(
+      "SELECT id FROM dine_in_orders WHERE dining_session_id=$1 AND status NOT IN('closed','cancelled')",
+      [first],
+    )
+  ).rows;
+  for (const row of open.filter((r) => r.id !== b.order.id))
+    await changeStatus(row.id, venueId, "manager", undefined, "Finish test visit");
+  expect(
+    (await pool.query("SELECT closed_at FROM dining_sessions WHERE id=$1", [first])).rows[0]
+      .closed_at,
+  ).toBeNull();
+  const last = b.order.id;
+  for (const target of ["accepted", "preparing", "delivered", "closed"] as const)
+    await changeStatus(last, venueId, "manager", target);
+  expect(
+    (await pool.query("SELECT closed_at FROM dining_sessions WHERE id=$1", [first])).rows[0]
+      .closed_at,
+  ).not.toBeNull();
+  const next = await submit(anon());
+  expect(await sessionId(next.order.id)).not.toBe(first);
+});
+
+test("cancel and manual payment in one service operation cannot mark a cancelled order paid", async () => {
+  const o = await submit(anon());
+  const result = await changeStatus(
+    o.order.id,
+    venueId,
+    "manager",
+    undefined,
+    "Cancellation wins",
+    true,
+  );
+  expect(result.status).toBe("cancelled");
+  expect(result.manualPaymentAt).toBeNull();
+});
+
+test("verified physical alias protects legacy, WhatsApp and normalized competing bookings while QR ordering remains independent", async () => {
+  const resource = table.resource_id;
+  await expect(
+    pool.query("UPDATE venue_resources SET is_reservable=true,capacity=6 WHERE id=$1", [resource]),
+  ).rejects.toMatchObject({ code: "23514" });
+  const config = { legacyCode: "A1", verified: true, reason: "Isolated fixture owner survey" };
+  const path = "/api/staff/v1/tables/" + resource + "/mapping";
+  expect((await api(path, config, { method: "PATCH", cookie: staff.operator })).status).toBe(403);
+  expect((await api(path, config, { method: "PATCH", cookie: staff.manager })).status).toBe(409);
+  await pool.query("UPDATE command_center_reservations SET status='cancelled' WHERE id=$1", [
+    legacy,
+  ]);
+  expect((await api(path, config, { method: "PATCH", cookie: staff.manager })).status).toBe(200);
+  await pool.query("UPDATE venue_resources SET is_reservable=true,capacity=6 WHERE id=$1", [
+    resource,
+  ]);
+  const bookingDay = new Date(Date.now() + 86400000 * 20);
+  const bookingStart = Date.UTC(
+    bookingDay.getUTCFullYear(),
+    bookingDay.getUTCMonth(),
+    bookingDay.getUTCDate(),
+    14,
+  );
+  const startsAt = new Date(bookingStart).toISOString(),
+    endsAt = new Date(bookingStart + 7200000).toISOString();
+  const jid = "77015550066@c.us";
+  const wa = async (suffix: string, data?: unknown) =>
+    (await handleBookingApi(
+      new Request("https://command.test/api/guest/v1" + suffix, {
+        method: data ? "POST" : "GET",
+        headers: {
+          "content-type": "application/json",
+          "x-hostess-service-key": process.env.WHATSAPP_SERVICE_KEY!,
+          "x-whatsapp-sender-jid": jid,
+        },
+        ...(data ? { body: JSON.stringify(data) } : {}),
+      }),
+    ))!;
+  const identity = await (
+    await wa("/identity", { name: "Physical fixture", jid, consent: true })
+  ).json();
+  const results = await Promise.all([
+    wa("/reservations", {
+      guestId: identity.guestId,
+      selection: { startsAt, endsAt, guests: 2, resourceId: resource },
+      idempotencyKey: randomToken(),
+    }),
+    wa("/reservations", {
+      guestId: identity.guestId,
+      selection: { startsAt, endsAt, guests: 2, tableIds: ["A1"] },
+      idempotencyKey: randomToken(),
+    }),
+  ]);
+  expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+  const availability = await (
+    await wa(
+      `/availability?startsAt=${encodeURIComponent(startsAt)}&endsAt=${encodeURIComponent(endsAt)}&guests=2`,
+    )
+  ).json();
+  expect(availability.tables.find((t: { id: string }) => t.id === "A1").available).toBe(false);
+  expect(availability.resources.find((r: { id: string }) => r.id === resource).available).toBe(
+    false,
+  );
+  // QR checkout never creates/reschedules a reservation, including for an occupied resource.
+  await pool.query(
+    "UPDATE command_center_reservations SET starts_at=now()-interval '30 minutes',ends_at=now()+interval '1 hour' WHERE guest_id=$1",
+    [identity.guestId],
+  );
+  expect((await submit(anon())).order.tableCode).toBeDefined();
+  expect(
+    (
+      await api(
+        path,
+        { legacyCode: null, verified: false, reason: "Attempt reconfiguration" },
+        { method: "PATCH", cookie: staff.manager },
+      )
+    ).status,
+  ).toBe(409);
+});
+
+test.skipIf(!process.env.HOSTESS_REPOSITORY || !process.env.XOXO_REPOSITORY)(
+  "real sibling main schemas and Hostess BFF complete anonymous checkout with cookie and receipt isolation",
+  async () => {
+    const hostessRoot = process.env.HOSTESS_REPOSITORY!;
+    const xoxoRoot = process.env.XOXO_REPOSITORY!;
+    const consumer = await import(
+      pathToFileURL(resolve(hostessRoot, "src/lib/dine-in-api.ts")).href
+    );
+    const { proxyHostessApi } = await import(
+      pathToFileURL(resolve(hostessRoot, "src/lib/server/guest-proxy.ts")).href
+    );
+    const receiver = await import(
+      pathToFileURL(resolve(xoxoRoot, "src/modules/command-center/order-events.service.ts")).href
+    );
+    const backendFetch = globalThis.fetch;
+    const runtime = {
+      BOOKING_API_ORIGIN: "https://command.test",
+      HOSTESS_BFF_KEY: process.env.HOSTESS_BFF_KEY,
+    };
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith("https://command.test/")) {
+        expect(new Headers(init?.headers).get("cookie") ?? "").not.toContain("hostess-staff");
+        return (await handleBookingApi(new Request(input, init)))!;
+      }
+      return backendFetch(input, init);
+    }) as typeof fetch;
+    const bff = (path: string, data?: unknown, cookie?: string) =>
+      proxyHostessApi(
+        new Request("https://hostes.online/api/guest/v1" + path, {
+          method: data ? "POST" : "GET",
+          headers: {
+            ...(data
+              ? { "content-type": "application/json", origin: "https://hostes.online" }
+              : {}),
+            ...(cookie ? { cookie } : {}),
+          },
+          ...(data ? { body: JSON.stringify(data) } : {}),
+        }),
+        runtime,
+      );
+    try {
+      consumer.tableSchema.parse(await (await bff("/dine-in/tables/" + table.token))!.json());
+      const qr = await bff("/dine-in/quotes", {
+        qrToken: table.token,
+        items: [{ productId, quantity: 3 }],
+        redeemAmount: 0,
+      });
+      expect(qr!.status).toBe(201);
+      const cookie = qr!.headers.get("set-cookie")!.split(";")[0];
+      expect(qr!.headers.get("set-cookie")).toContain("HttpOnly");
+      const q = consumer.quoteSchema.parse(await qr!.json());
+      const saved = await bff(
+        "/dine-in/orders",
+        { quoteId: q.id, idempotencyKey: randomToken() },
+        cookie + "; __Host-hostess-staff=" + randomToken(),
+      );
+      expect(saved!.status).toBe(201);
+      const order = consumer.orderSchema.parse((await saved!.json()).order);
+      const receipt = await bff(`/dine-in/orders/${order.id}?receiptToken=${order.receiptToken}`);
+      expect(receipt!.status).toBe(200);
+      expect((await receipt!.json()).order.guestPhone).toBeUndefined();
+      expect((await bff("/dine-in/orders/" + order.id))!.status).toBe(404);
+      const rows = (
+        await pool.query("SELECT id,payload FROM integration_outbox WHERE order_id=$1", [order.id])
+      ).rows;
+      const { orderEventPayload } = await import("../src/server/dine-in/outbox");
+      for (const row of rows)
+        expect(
+          receiver.orderEventSchema.parse(orderEventPayload(row.id, row.payload)).unitPrice,
+        ).toBe("1590.00");
+    } finally {
+      globalThis.fetch = backendFetch;
+    }
+  },
+);
+
+test("outbox retains 429/5xx for retry and recovers an expired delivery lease", async () => {
+  const o = await submit(anon());
+  const id = (await pool.query("SELECT id FROM integration_outbox WHERE order_id=$1", [o.order.id]))
+    .rows[0].id;
+  process.env.DINE_IN_OUTBOX_ENABLED = "yes";
+  try {
+    for (const status of [429, 500, 503]) {
+      retryStatus = status;
+      await pool.query("UPDATE integration_outbox SET next_attempt_at=now() WHERE id=$1", [id]);
+      await drainOutbox();
+      const row = (
+        await pool.query(
+          "SELECT status,terminal,last_error,next_attempt_at>now() AS backoff FROM integration_outbox WHERE id=$1",
+          [id],
+        )
+      ).rows[0];
+      expect(row).toMatchObject({
+        status: "failed",
+        terminal: false,
+        last_error: `HTTP_${status}`,
+        backoff: true,
+      });
+    }
+    retryStatus = 0;
+    await pool.query(
+      "UPDATE integration_outbox SET status='delivering',locked_until=now()-interval '1 second',lease_token=$2 WHERE id=$1",
+      [id, randomUUID()],
+    );
+    await drainOutbox();
+    expect(
+      (await pool.query("SELECT status FROM integration_outbox WHERE id=$1", [id])).rows[0].status,
+    ).toBe("delivered");
+    expect(delivered.filter((eventId) => eventId === id).length).toBe(4);
+  } finally {
+    retryStatus = 0;
+    process.env.DINE_IN_OUTBOX_ENABLED = "no";
+  }
 });

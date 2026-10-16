@@ -47,6 +47,12 @@ Staff endpoints use existing __Host-hostess-staff. Every write requires Origin m
 
 Existing booking, authentication, Exchange and WhatsApp routes are preserved.
 
+Staff POST/PATCH `/guests` remains available when `DINE_IN_ENABLED=no`, with the same session, role and Origin checks. QR guest routes remain gated.
+
+Physical inventory mapping is additive: GET `/tables/qr` also returns `legacyCode`, `mappingVerified`, `bookable`. Manager PATCH `/tables/:resourceId/mapping` accepts `{legacyCode: "A1"|...|"Bar"|null, verified: boolean, reason: string}`. Null plus verified=true confirms a separate physical table; null plus verified=false clears confirmation. A typed legacy code requires explicit verification. Mapping changes require an empty future booking schedule and no live holds; they do not enable reservations. Unconfirmed QR resources stay unbookable. VIP resources remain separate.
+
+Public QR and WhatsApp magic-link origin: `https://hostes.online`. Changing the origin preserves QR resource IDs, tokens and generations.
+
 ## XOXO receiver contract
 POST https://hostess-xoxo-production.up.railway.app/api/v1/command-center/order-events
 Header x-command-center-key = existing COMMAND_CENTER_SERVICE_KEY; Idempotency-Key = eventId.
