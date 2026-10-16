@@ -14,7 +14,8 @@ if (
   process.env.DATABASE_URL !== process.env.TEST_DINING_DATABASE_URL
 )
   throw new Error("Isolated local PostgreSQL required");
-const productId = randomUUID(), roundId=randomUUID(),
+const productId = randomUUID(),
+  roundId = randomUUID(),
   originalFetch = globalThis.fetch;
 let table: { token: string; resource_id: string },
   venueId: string,
@@ -40,12 +41,28 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     });
   }
   if (String(input).endsWith("/order-events")) {
-    const payload=JSON.parse(String(init?.body));
-    expect(Object.keys(payload).sort()).toEqual(["eventId","eventType","orderId","orderItemId","exchangeProductId","roundId","quantity","unitPrice","occurredAt","venueCode"].sort());
+    const payload = JSON.parse(String(init?.body));
+    expect(Object.keys(payload).sort()).toEqual(
+      [
+        "eventId",
+        "eventType",
+        "orderId",
+        "orderItemId",
+        "exchangeProductId",
+        "roundId",
+        "quantity",
+        "unitPrice",
+        "occurredAt",
+        "venueCode",
+      ].sort(),
+    );
     expect(payload.unitPrice).toBe("1590.00");
     expect(payload.roundId).toBe(roundId);
     delivered.push(payload.eventId);
-    return Response.json({accepted:!outboxFail,eventId:payload.eventId},{status:outboxFail?503:200});
+    return Response.json(
+      { accepted: !outboxFail, eventId: payload.eventId },
+      { status: outboxFail ? 503 : 200 },
+    );
   }
   return originalFetch(input, init);
 }) as typeof fetch;
