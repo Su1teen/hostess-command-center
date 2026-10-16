@@ -35,7 +35,7 @@ try {
       COMMAND_CENTER_SERVICE_KEY: "s".repeat(43),
       EXCHANGE_API_ORIGIN: "http://127.0.0.1:19092",
       COMMAND_CENTER_ORIGIN: "https://command.test",
-      HOSTESS_PUBLIC_ORIGIN: "https://hostess.online",
+      HOSTESS_PUBLIC_ORIGIN: "https://hostes.online",
       DINE_IN_ENABLED: suite === "dine-in" ? "yes" : "no",
       DINE_IN_PILOT_ASSUMED_PAID: "yes",
       DINE_IN_OUTBOX_ENABLED: "no",

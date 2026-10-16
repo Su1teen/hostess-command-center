@@ -27,7 +27,7 @@ const env = {
   PORT: "3000",
   HOST: "127.0.0.1",
   COMMAND_CENTER_ORIGIN: "http://localhost:3000",
-  HOSTESS_PUBLIC_ORIGIN: "https://hostess.online",
+  HOSTESS_PUBLIC_ORIGIN: "https://hostes.online",
   EXCHANGE_API_ORIGIN: "https://127.0.0.1:19092",
   EXCHANGE_DATA_MODE: "api",
   HOSTESS_BFF_KEY: key,

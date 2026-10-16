@@ -1,11 +1,14 @@
 import { beforeAll, afterAll, expect, test } from "bun:test";
-import {
-  tableSchema,
-  quoteSchema,
-  orderSchema,
-  walletSchema,
-  transactionSchema,
-} from "./contracts/hostess-schema";
+import * as consumerFixture from "./contracts/hostess-schema";
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+// Optional sibling checkout: validate the real current consumer, not just a copied schema.
+const consumer = process.env.HOSTESS_CONSUMER_ROOT
+  ? await import(
+      pathToFileURL(resolve(process.env.HOSTESS_CONSUMER_ROOT, "src/lib/dine-in-api.ts")).href
+    )
+  : consumerFixture;
+const { tableSchema, quoteSchema, orderSchema, walletSchema, transactionSchema } = consumer;
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { pool } from "../src/server/db/pool";

@@ -107,7 +107,7 @@ describe("quote and service state", () => {
   });
 });
 describe("real QR exports", () => {
-  const url = "https://hostess.online/v/xoxo/t/03/" + "a".repeat(64);
+  const url = "https://hostes.online/v/xoxo/t/03/" + "a".repeat(64);
   test("SVG modules and quiet zone", () => {
     const svg = qrSvg(url);
     expect(svg).toContain('shape-rendering="crispEdges"');
@@ -142,9 +142,9 @@ describe("real QR exports", () => {
     expect(html).toContain("@page");
   });
   test("permanent public URL", () => {
-    process.env.HOSTESS_PUBLIC_ORIGIN = "https://hostess.online";
+    process.env.HOSTESS_PUBLIC_ORIGIN = "https://hostes.online";
     expect(tableUrl("03", "a".repeat(43))).toBe(
-      "https://hostess.online/v/xoxo/t/03/" + "a".repeat(43),
+      "https://hostes.online/v/xoxo/t/03/" + "a".repeat(43),
     );
   });
 });

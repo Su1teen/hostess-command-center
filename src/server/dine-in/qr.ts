@@ -3,7 +3,7 @@ import qrcodegen from "./vendor/qrcodegen";
 import { ApiError } from "../guest/security";
 
 export function tableUrl(code: string, token: string) {
-  const origin = new URL(process.env.HOSTESS_PUBLIC_ORIGIN ?? "https://hostess.online");
+  const origin = new URL(process.env.HOSTESS_PUBLIC_ORIGIN ?? "https://hostes.online");
   if (origin.protocol !== "https:")
     throw new ApiError(503, "CONFIG_REQUIRED", "Публичный адрес должен использовать HTTPS");
   return `${origin.origin}/v/xoxo/t/${encodeURIComponent(code)}/${token}`;
