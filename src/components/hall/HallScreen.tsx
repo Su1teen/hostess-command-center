@@ -52,7 +52,10 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
   const [panelOpen, setPanelOpen] = useState(openReservations);
-  const [create, setCreate] = useState<{ tableId: string | null; resourceId?: string | null } | null>(null);
+  const [create, setCreate] = useState<{
+    tableId: string | null;
+    resourceId?: string | null;
+  } | null>(null);
   const [activeZone, setActiveZone] = useState("vip");
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -132,7 +135,9 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
             </p>
             <p className="mt-1 text-xs text-slate-400">Доступность на выбранное время</p>
           </div>
-          {availability.isFetching && <span className="text-[11px] text-slate-400">Обновляем…</span>}
+          {availability.isFetching && (
+            <span className="text-[11px] text-slate-400">Обновляем…</span>
+          )}
         </div>
         <div className="flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
           {availability.data?.zones.map((zone) => (
@@ -154,7 +159,9 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
                   item.tableIds.includes(resource.code) &&
                   !["cancelled", "no_show"].includes(item.status) &&
                   Date.parse(item.startsAt) < Date.parse(endsAt) &&
-                  Date.parse(item.endsAt ?? new Date(Date.parse(item.startsAt) + 2 * 3600_000).toISOString()) > Date.parse(startsAt),
+                  Date.parse(
+                    item.endsAt ?? new Date(Date.parse(item.startsAt) + 2 * 3600_000).toISOString(),
+                  ) > Date.parse(startsAt),
               );
               return (
                 <button
@@ -175,7 +182,11 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
                     <span className="text-xs text-slate-500">{resource.capacity} мест</span>
                   </span>
                   <span className="mt-1 block text-xs text-slate-500">
-                    {resource.available ? "Свободно · создать бронь" : reservation ? "Занято · открыть бронь" : "Недоступно"}
+                    {resource.available
+                      ? "Свободно · создать бронь"
+                      : reservation
+                        ? "Занято · открыть бронь"
+                        : "Недоступно"}
                   </span>
                 </button>
               );
@@ -190,7 +201,8 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
       </section>
 
       <p className="px-1 text-center text-[11px] text-slate-400">
-        Старая карта A/B/C сохранена для совместимости; её физическое соответствие ещё требует проверки.
+        Старая карта A/B/C сохранена для совместимости; её физическое соответствие ещё требует
+        проверки.
       </p>
       <FloorPlan
         occupancy={occupancy}

@@ -17,7 +17,12 @@ import { TopProducts } from "../analytics/TopProducts";
 
 const quickLinks = [
   { to: "/menu" as const, label: "Меню", caption: "Барная карта и кухня", icon: ChefHat },
-  { to: "/guests" as const, label: "Гости и чеки", caption: "Клиенты, заказы, кэшбэк", icon: Users },
+  {
+    to: "/guests" as const,
+    label: "Гости и чеки",
+    caption: "Клиенты, заказы, кэшбэк",
+    icon: Users,
+  },
   {
     to: "/suppliers" as const,
     label: "Поставщики",

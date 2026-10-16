@@ -12,11 +12,13 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SuppliersRouteImport } from './routes/suppliers'
 import { Route as SalesRouteImport } from './routes/sales'
 import { Route as ReservationsRouteImport } from './routes/reservations'
+import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as MenuRouteImport } from './routes/menu'
 import { Route as HealthRouteImport } from './routes/health'
 import { Route as GuestsRouteImport } from './routes/guests'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as TablesQrRouteImport } from './routes/tables.qr'
 
 const SuppliersRoute = SuppliersRouteImport.update({
   id: '/suppliers',
@@ -31,6 +33,11 @@ const SalesRoute = SalesRouteImport.update({
 const ReservationsRoute = ReservationsRouteImport.update({
   id: '/reservations',
   path: '/reservations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrdersRoute = OrdersRouteImport.update({
+  id: '/orders',
+  path: '/orders',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MenuRoute = MenuRouteImport.update({
@@ -58,6 +65,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TablesQrRoute = TablesQrRouteImport.update({
+  id: '/tables/qr',
+  path: '/tables/qr',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -65,9 +77,11 @@ export interface FileRoutesByFullPath {
   '/guests': typeof GuestsRoute
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
+  '/orders': typeof OrdersRoute
   '/reservations': typeof ReservationsRoute
   '/sales': typeof SalesRoute
   '/suppliers': typeof SuppliersRoute
+  '/tables/qr': typeof TablesQrRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -75,9 +89,11 @@ export interface FileRoutesByTo {
   '/guests': typeof GuestsRoute
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
+  '/orders': typeof OrdersRoute
   '/reservations': typeof ReservationsRoute
   '/sales': typeof SalesRoute
   '/suppliers': typeof SuppliersRoute
+  '/tables/qr': typeof TablesQrRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -86,9 +102,11 @@ export interface FileRoutesById {
   '/guests': typeof GuestsRoute
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
+  '/orders': typeof OrdersRoute
   '/reservations': typeof ReservationsRoute
   '/sales': typeof SalesRoute
   '/suppliers': typeof SuppliersRoute
+  '/tables/qr': typeof TablesQrRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -98,9 +116,11 @@ export interface FileRouteTypes {
     | '/guests'
     | '/health'
     | '/menu'
+    | '/orders'
     | '/reservations'
     | '/sales'
     | '/suppliers'
+    | '/tables/qr'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -108,9 +128,11 @@ export interface FileRouteTypes {
     | '/guests'
     | '/health'
     | '/menu'
+    | '/orders'
     | '/reservations'
     | '/sales'
     | '/suppliers'
+    | '/tables/qr'
   id:
     | '__root__'
     | '/'
@@ -118,9 +140,11 @@ export interface FileRouteTypes {
     | '/guests'
     | '/health'
     | '/menu'
+    | '/orders'
     | '/reservations'
     | '/sales'
     | '/suppliers'
+    | '/tables/qr'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -129,9 +153,11 @@ export interface RootRouteChildren {
   GuestsRoute: typeof GuestsRoute
   HealthRoute: typeof HealthRoute
   MenuRoute: typeof MenuRoute
+  OrdersRoute: typeof OrdersRoute
   ReservationsRoute: typeof ReservationsRoute
   SalesRoute: typeof SalesRoute
   SuppliersRoute: typeof SuppliersRoute
+  TablesQrRoute: typeof TablesQrRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -155,6 +181,13 @@ declare module '@tanstack/react-router' {
       path: '/reservations'
       fullPath: '/reservations'
       preLoaderRoute: typeof ReservationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/orders': {
+      id: '/orders'
+      path: '/orders'
+      fullPath: '/orders'
+      preLoaderRoute: typeof OrdersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/menu': {
@@ -192,6 +225,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/tables/qr': {
+      id: '/tables/qr'
+      path: '/tables/qr'
+      fullPath: '/tables/qr'
+      preLoaderRoute: typeof TablesQrRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -201,9 +241,11 @@ const rootRouteChildren: RootRouteChildren = {
   GuestsRoute: GuestsRoute,
   HealthRoute: HealthRoute,
   MenuRoute: MenuRoute,
+  OrdersRoute: OrdersRoute,
   ReservationsRoute: ReservationsRoute,
   SalesRoute: SalesRoute,
   SuppliersRoute: SuppliersRoute,
+  TablesQrRoute: TablesQrRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

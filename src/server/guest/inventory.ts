@@ -178,7 +178,7 @@ export async function selectReservableResource(
     guests: number;
   },
 ): Promise<VenueResourceRow> {
-  let candidates = await client.query<VenueResourceRow>(
+  const candidates = await client.query<VenueResourceRow>(
     `SELECT r.id,r.zone_id,r.code,r.name,r.resource_type,r.capacity,r.is_reservable,r.status,
        z.code AS zone_code,z.name AS zone_name,
        l.x,l.y,l.width,l.height,l.shape,l.rotation,l.display_properties
@@ -217,14 +217,23 @@ export async function selectReservableResource(
   if (candidates.rows[0]) return candidates.rows[0];
 
   if (input.resourceId) {
-    const requested = await client.query<{ capacity: number | null; is_reservable: boolean; status: string }>(
+    const requested = await client.query<{
+      capacity: number | null;
+      is_reservable: boolean;
+      status: string;
+    }>(
       `SELECT r.capacity,r.is_reservable,r.status FROM venue_resources r
        JOIN venue_zones z ON z.id=r.zone_id WHERE r.id=$1 AND r.venue_code='xoxo' AND z.is_active`,
       [input.resourceId],
     );
-    if (!requested.rows[0]) throw new ApiError(422, "INVALID_RESOURCE", "Такого места нет в схеме заведения");
+    if (!requested.rows[0])
+      throw new ApiError(422, "INVALID_RESOURCE", "Такого места нет в схеме заведения");
     if (!requested.rows[0].is_reservable || requested.rows[0].status !== "active")
-      throw new ApiError(409, "RESOURCE_UNAVAILABLE", "Это место пока нельзя забронировать автоматически");
+      throw new ApiError(
+        409,
+        "RESOURCE_UNAVAILABLE",
+        "Это место пока нельзя забронировать автоматически",
+      );
     if (requested.rows[0].capacity === null || requested.rows[0].capacity < input.guests)
       throw new ApiError(422, "CAPACITY", "В выбранной комнате недостаточно мест");
     throw new ApiError(409, "CONFLICT", "Это место уже занято на выбранное время");

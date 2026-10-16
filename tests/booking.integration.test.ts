@@ -63,9 +63,10 @@ beforeAll(async () => {
     "0002_reservation_tables.sql",
     "0003_guest_booking.sql",
     "0004_venue_inventory.sql",
+    "0005_fix_normalized_resource_links.sql",
   ])
     await pool.query(
-      readFileSync(`C:/hostess-command-center/src/server/db/migrations/${file}`, "utf8"),
+      readFileSync(new URL(`../src/server/db/migrations/${file}`, import.meta.url), "utf8"),
     );
 });
 afterAll(async () => {
@@ -131,7 +132,12 @@ describe("canonical reservation transactions", () => {
       undefined,
       { cookie: guest.cookie },
     );
-    const rooms = new Map(available.data.resources.map((room: { code: string; fitsGuestCount: boolean }) => [room.code, room]));
+    const rooms = new Map(
+      available.data.resources.map((room: { code: string; fitsGuestCount: boolean }) => [
+        room.code,
+        room,
+      ]),
+    );
     expect(available.status).toBe(200);
     expect(rooms.get("VIP2")?.fitsGuestCount).toBe(true);
     expect(rooms.get("VIP3")?.fitsGuestCount).toBe(false);

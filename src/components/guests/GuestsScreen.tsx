@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { GuestCrmTools } from "./GuestCrmTools";
 type Guest = {
   id: string;
   name: string;
   phone: string | null;
   provisional: boolean;
+  source?: string;
   reservations: number;
   visits: number;
 };
@@ -64,6 +66,21 @@ export function GuestsScreen() {
           onChange={(e) => setQuery(e.target.value)}
         />
       </label>
+      <GuestCrmTools
+        key={selected?.id ?? "new"}
+        selected={selected}
+        onSaved={() => {
+          void fetch("/api/staff/v1/guests", { cache: "no-store" })
+            .then(async (r) => {
+              const data = await r.json();
+              if (!r.ok) throw new Error(data.error?.message ?? "Не удалось обновить гостей");
+              setGuests(data.guests);
+              if (selected)
+                setSelected(data.guests.find((g: Guest) => g.id === selected.id) ?? null);
+            })
+            .catch((e) => setError(e.message));
+        }}
+      />
       {error && (
         <p role="alert" className="mt-4 text-sm text-red-700">
           {error}
@@ -84,6 +101,7 @@ export function GuestsScreen() {
                 className="min-h-16 w-full rounded-2xl bg-white p-4 text-left"
               >
                 <span className="font-medium">{g.name}</span>
+                {g.source && <span className="ml-2 text-xs text-slate-400">{g.source}</span>}
                 <span className="mt-1 block text-xs text-slate-500">
                   {g.provisional ? "Телефон не подтверждён" : "WhatsApp identity подтверждена"} ·{" "}
                   {g.reservations} броней · {g.visits} подтверждённых визитов

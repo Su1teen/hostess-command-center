@@ -20,8 +20,25 @@ export function MenuScreen() {
   const [items, setItems] = useState(DEMO_MENU);
   const [editingKitchen, setEditingKitchen] = useState<DemoMenuItem | null>(null);
   const [kitchenPrice, setKitchenPrice] = useState("");
-  useEffect(() => { try { const saved = localStorage.getItem("xoxo:kitchen:demo:v1"); if (saved) { const parsed: unknown = JSON.parse(saved); if (Array.isArray(parsed)) setItems(parsed as DemoMenuItem[]); } } catch { /* Keep the seed catalog. */ } }, []);
-  const updateItems = (next: DemoMenuItem[]) => { setItems(next); try { localStorage.setItem("xoxo:kitchen:demo:v1", JSON.stringify(next)); } catch { /* Still editable this session. */ } };
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("xoxo:kitchen:demo:v1");
+      if (saved) {
+        const parsed: unknown = JSON.parse(saved);
+        if (Array.isArray(parsed)) setItems(parsed as DemoMenuItem[]);
+      }
+    } catch {
+      /* Keep the seed catalog. */
+    }
+  }, []);
+  const updateItems = (next: DemoMenuItem[]) => {
+    setItems(next);
+    try {
+      localStorage.setItem("xoxo:kitchen:demo:v1", JSON.stringify(next));
+    } catch {
+      /* Still editable this session. */
+    }
+  };
   const [category, setCategory] = useState<MenuCategory>("Все блюда");
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
@@ -242,7 +259,31 @@ export function MenuScreen() {
               >
                 {item.active ? "Активно" : "Скрыто"}
               </span>
-              <span className="mt-2 flex gap-2"><button type="button" onClick={() => { setEditingKitchen(item); setKitchenPrice(String(item.price)); }} className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-700">Цена</button><button type="button" onClick={() => updateItems(items.map((row) => row.id === item.id ? { ...row, active: !row.active } : row))} className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-700">{item.active ? "Скрыть" : "Показать"}</button></span>
+              <span className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingKitchen(item);
+                    setKitchenPrice(String(item.price));
+                  }}
+                  className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-700"
+                >
+                  Цена
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateItems(
+                      items.map((row) =>
+                        row.id === item.id ? { ...row, active: !row.active } : row,
+                      ),
+                    )
+                  }
+                  className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-700"
+                >
+                  {item.active ? "Скрыть" : "Показать"}
+                </button>
+              </span>
             </span>
           </article>
         ))}
@@ -252,7 +293,40 @@ export function MenuScreen() {
           </p>
         )}
       </section>
-      {editingKitchen && <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 sm:items-center" onClick={() => setEditingKitchen(null)}><div className="w-full max-w-md space-y-3 rounded-t-[2rem] bg-white p-5 pb-8 sm:rounded-[2rem]" onClick={(event) => event.stopPropagation()}><h3 className="text-xl font-bold">{editingKitchen.name}</h3><p className="text-sm text-slate-500">Цена кухни · демо</p><input className="field" inputMode="numeric" value={kitchenPrice} onChange={(event) => setKitchenPrice(event.target.value)}/><button type="button" onClick={() => { const price = Number(kitchenPrice); if (!Number.isFinite(price) || price <= 0) return; updateItems(items.map((row) => row.id === editingKitchen.id ? { ...row, price } : row)); setEditingKitchen(null); }} className="w-full rounded-2xl bg-slate-900 py-3.5 font-semibold text-white">Сохранить цену</button></div></div>}
+      {editingKitchen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 sm:items-center"
+          onClick={() => setEditingKitchen(null)}
+        >
+          <div
+            className="w-full max-w-md space-y-3 rounded-t-[2rem] bg-white p-5 pb-8 sm:rounded-[2rem]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="text-xl font-bold">{editingKitchen.name}</h3>
+            <p className="text-sm text-slate-500">Цена кухни · демо</p>
+            <input
+              className="field"
+              inputMode="numeric"
+              value={kitchenPrice}
+              onChange={(event) => setKitchenPrice(event.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const price = Number(kitchenPrice);
+                if (!Number.isFinite(price) || price <= 0) return;
+                updateItems(
+                  items.map((row) => (row.id === editingKitchen.id ? { ...row, price } : row)),
+                );
+                setEditingKitchen(null);
+              }}
+              className="w-full rounded-2xl bg-slate-900 py-3.5 font-semibold text-white"
+            >
+              Сохранить цену
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

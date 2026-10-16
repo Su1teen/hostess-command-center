@@ -1,4 +1,6 @@
 import { getById } from "../repositories/reservations.repository";
+import { handleDiningApi, guestDiningSummary } from "../dine-in/api";
+import { mergeDiningGuest, mergeVerifiedStaffGuests } from "../dine-in/loyalty";
 import { z } from "zod";
 import { HALL_TABLES, TV_SCREENS, FLOOR_WIDTH, FLOOR_HEIGHT } from "../../lib/hall/layout";
 import { pool } from "../db/pool";
@@ -180,6 +182,8 @@ async function reservationList(
 }
 
 export async function handleBookingApi(request: Request): Promise<Response | null> {
+  const dining = await handleDiningApi(request);
+  if (dining) return dining;
   const url = new URL(request.url);
   if (url.pathname.startsWith("/api/staff/v1/")) return handleStaff(request, url);
   if (!url.pathname.startsWith(`${prefix}/`)) return null;
@@ -223,7 +227,10 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
           "SELECT guest_id FROM hostess_guest_identities WHERE provider='whatsapp' AND subject=$1",
           [identity.subject],
         );
-        if (existing.rows[0] && !input.claimCode) return existing.rows[0].guest_id as string;
+        if (existing.rows[0] && !input.claimCode) {
+          await mergeVerifiedStaffGuests(client, existing.rows[0].guest_id, identity.phone);
+          return existing.rows[0].guest_id as string;
+        }
         let provisionalId: string | undefined;
         if (input.claimCode) {
           const challenge = await client.query(
@@ -249,6 +256,8 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
         }
         if (existing.rows[0]) {
           const canonical = existing.rows[0].guest_id;
+          if ((await client.query("SELECT to_regclass('dine_in_orders') AS name")).rows[0].name)
+            await mergeDiningGuest(client, provisionalId!, canonical);
           await actor(client, `whatsapp:${canonical}`);
           await client.query(
             "UPDATE command_center_reservations SET guest_id=$1,updated_at=now() WHERE guest_id=$2",
@@ -269,6 +278,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
             `INSERT INTO hostess_audit(actor,action,entity_id,details) VALUES('whatsapp','provisional_merged',$1,jsonb_build_object('provisionalId',$2::text))`,
             [canonical, provisionalId],
           );
+          await mergeVerifiedStaffGuests(client, canonical, identity.phone);
           return canonical as string;
         }
         if (provisionalId) {
@@ -283,6 +293,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
             `INSERT INTO hostess_phone_verifications(guest_id,phone,identity_id) VALUES($1,$2,$3)`,
             [provisionalId, identity.phone, identityRow.rows[0].id],
           );
+          await mergeVerifiedStaffGuests(client, provisionalId, identity.phone);
           return provisionalId;
         }
         const created = await client.query(
@@ -290,6 +301,8 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
           [input.name, identity.phone],
         );
         const id = created.rows[0].id;
+        if (process.env.DINE_IN_ENABLED === "yes")
+          await client.query("UPDATE hostess_guests SET source='whatsapp' WHERE id=$1", [id]);
         const verified = await client.query(
           `INSERT INTO hostess_guest_identities(guest_id,provider,subject) VALUES($1,'whatsapp',$2) RETURNING id`,
           [id, identity.subject],
@@ -302,6 +315,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
           `INSERT INTO hostess_audit(actor,action,entity_id) VALUES('whatsapp','identity_verified',$1)`,
           [id],
         );
+        await mergeVerifiedStaffGuests(client, id, identity.phone);
         return id as string;
       });
       return json({ guestId: guest });
@@ -368,7 +382,8 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
         endsAt: url.searchParams.get("endsAt"),
       });
       const guestsParam = url.searchParams.get("guests");
-      const guests = guestsParam === null ? null : z.coerce.number().int().min(1).max(20).parse(guestsParam);
+      const guests =
+        guestsParam === null ? null : z.coerce.number().int().min(1).max(20).parse(guestsParam);
       const result = await availability(
         input.startsAt,
         input.endsAt,
@@ -380,23 +395,25 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
       if (requestedZone) uuid.parse(requestedZone);
       if (requestedResource) uuid.parse(requestedResource);
       if (requestedZone || requestedResource) {
-        result.resources = result.resources.filter((r) =>
-          (requestedZone ? r.zoneId === requestedZone : true) &&
-          (requestedResource ? r.id === requestedResource : true),
+        result.resources = result.resources.filter(
+          (r) =>
+            (requestedZone ? r.zoneId === requestedZone : true) &&
+            (requestedResource ? r.id === requestedResource : true),
         );
         result.zones = result.zones
           .map((zone) => ({
             ...zone,
-            resources: zone.resources.filter((r) => !requestedResource || r.id === requestedResource),
+            resources: zone.resources.filter(
+              (r) => !requestedResource || r.id === requestedResource,
+            ),
           }))
-          .filter((zone) =>
-            (!requestedZone || zone.id === requestedZone) &&
-            (!requestedResource || zone.resources.length > 0),
+          .filter(
+            (zone) =>
+              (!requestedZone || zone.id === requestedZone) &&
+              (!requestedResource || zone.resources.length > 0),
           );
       }
-      return json(
-        result,
-      );
+      return json(result);
     }
     const guestId = await guestFor(
       request,
@@ -471,8 +488,18 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
     if (path === "/holds" && method === "POST") {
       const input = z
         .union([
-          selectionSchema.extend({ guestId: uuid.optional(), idempotencyKey: z.string().min(16).max(128).optional() }).strict(),
-          inventorySelectionSchema.extend({ guestId: uuid.optional(), idempotencyKey: z.string().min(16).max(128).optional() }).strict(),
+          selectionSchema
+            .extend({
+              guestId: uuid.optional(),
+              idempotencyKey: z.string().min(16).max(128).optional(),
+            })
+            .strict(),
+          inventorySelectionSchema
+            .extend({
+              guestId: uuid.optional(),
+              idempotencyKey: z.string().min(16).max(128).optional(),
+            })
+            .strict(),
         ])
         .parse(data);
       if ("tableIds" in input) validateSelection(input, HALL_TABLES);
@@ -483,7 +510,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
             startsAt: input.startsAt,
             endsAt: input.endsAt,
             guests: input.guests,
-            ...( "tableIds" in input
+            ...("tableIds" in input
               ? { tableIds: input.tableIds }
               : { resourceId: input.resourceId ?? null, zoneId: input.zoneId ?? null }),
           }),
@@ -500,7 +527,11 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
           ).rows[0];
           if (previous) {
             if (previous.request_hash !== requestHash)
-              throw new ApiError(409, "IDEMPOTENCY_MISMATCH", "Ключ уже использован для другого запроса");
+              throw new ApiError(
+                409,
+                "IDEMPOTENCY_MISMATCH",
+                "Ключ уже использован для другого запроса",
+              );
             const existing = (
               await client.query(
                 `SELECT h.id,h.expires_at AS "expiresAt",vr.id AS "resourceId",vr.code AS "resourceCode",
@@ -512,7 +543,8 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
                 [previous.hold_id, guestId],
               )
             ).rows[0];
-            if (!existing) throw new ApiError(409, "HOLD_EXPIRED", "Удержание истекло. Создайте новое");
+            if (!existing)
+              throw new ApiError(409, "HOLD_EXPIRED", "Удержание истекло. Создайте новое");
             return existing;
           }
         }
@@ -525,10 +557,10 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
           ? await createResourceHold(client, guestId, input)
           : (
               await client.query(
-            `INSERT INTO hostess_holds(guest_id,table_ids,starts_at,ends_at,guests)
+                `INSERT INTO hostess_holds(guest_id,table_ids,starts_at,ends_at,guests)
           VALUES($1,$2,$3,$4,$5) RETURNING id,expires_at AS "expiresAt"`,
-            [guestId, input.tableIds, input.startsAt, input.endsAt, input.guests],
-          )
+                [guestId, input.tableIds, input.startsAt, input.endsAt, input.guests],
+              )
             ).rows[0];
         if (input.idempotencyKey)
           await client.query(
@@ -662,7 +694,13 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
             hold = (
               await client.query(
                 "INSERT INTO hostess_holds(guest_id,table_ids,guests,starts_at,ends_at) VALUES($1,$2,$3,$4,$5) RETURNING *",
-                [guestId, selection.tableIds, selection.guests, selection.startsAt, selection.endsAt],
+                [
+                  guestId,
+                  selection.tableIds,
+                  selection.guests,
+                  selection.startsAt,
+                  selection.endsAt,
+                ],
               )
             ).rows[0];
           } else {
@@ -811,7 +849,10 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
               h.guests,
             ],
           );
-          await client.query("DELETE FROM command_center_reservation_resources WHERE reservation_id=$1", [r.id]);
+          await client.query(
+            "DELETE FROM command_center_reservation_resources WHERE reservation_id=$1",
+            [r.id],
+          );
           await client.query(
             `INSERT INTO command_center_reservation_resources(reservation_id,resource_id)
              SELECT $1,resource_id FROM hostess_hold_resources WHERE hold_id=$2`,
@@ -834,7 +875,10 @@ function apiFailure(e: unknown) {
   if ((e as { code?: string })?.code === "23P01")
     return json({ error: { code: "CONFLICT", message: "Стол уже занят. Выберите другой" } }, 409);
   if ((e as { code?: string })?.code === "23514")
-    return json({ error: { code: "INVALID_SELECTION", message: "Проверьте выбранное место и число гостей" } }, 422);
+    return json(
+      { error: { code: "INVALID_SELECTION", message: "Проверьте выбранное место и число гостей" } },
+      422,
+    );
   // Do not log raw requests, tokens, PII or driver errors/connection URLs.
   console.error("[booking] request failed", e instanceof Error ? e.name : "UnknownError");
   return json(
@@ -888,6 +932,22 @@ async function handleStaff(request: Request, url: URL) {
       return json({ ok: true }, 200, cookie("__Host-hostess-staff", "", 0));
     }
     if (path === "/guests" && request.method === "GET") {
+      if (process.env.DINE_IN_ENABLED === "yes") {
+        const search = z
+          .string()
+          .max(100)
+          .parse(url.searchParams.get("q") ?? "");
+        const guests = await pool.query(
+          `SELECT g.id,g.name,g.phone,g.provisional,g.source,
+          (SELECT count(*)::int FROM command_center_reservations r WHERE r.guest_id=g.id) AS reservations,
+          (SELECT count(*)::int FROM command_center_reservations r WHERE r.guest_id=g.id AND r.status='arrived') AS visits,
+          (SELECT count(*)::int FROM dine_in_orders o WHERE o.guest_id=g.id) AS orders
+          FROM hostess_guests g WHERE g.merged_into IS NULL AND ($1='' OR concat_ws(' ',g.name,g.phone) ILIKE '%'||$1||'%')
+          ORDER BY g.created_at DESC LIMIT 1000`,
+          [search],
+        );
+        return json({ guests: guests.rows });
+      }
       const guests =
         await pool.query(`SELECT g.id,g.name,g.phone,g.provisional,count(r.id)::int AS reservations,
         count(r.id) FILTER (WHERE r.status='arrived')::int AS visits FROM hostess_guests g
@@ -896,7 +956,10 @@ async function handleStaff(request: Request, url: URL) {
     }
     const guestMatch = /^\/guests\/([a-f0-9-]{36})$/.exec(path);
     if (guestMatch && request.method === "GET")
-      return json({ reservations: await reservationList(guestMatch[1]) });
+      return json({
+        reservations: await reservationList(guestMatch[1]),
+        ...(process.env.DINE_IN_ENABLED === "yes" ? await guestDiningSummary(guestMatch[1]) : {}),
+      });
     const legacy = /^\/guests\/([a-f0-9-]{36})\/link-reservation$/.exec(path);
     if (legacy && request.method === "POST") {
       checkStaffOrigin(request);
@@ -948,7 +1011,10 @@ async function handleStaff(request: Request, url: URL) {
           reason: z.string().trim().min(3).max(300),
         })
         .strict()
-        .refine((value) => Boolean(value.tableIds) !== Boolean(value.resourceId), "Выберите стол или ресурс")
+        .refine(
+          (value) => Boolean(value.tableIds) !== Boolean(value.resourceId),
+          "Выберите стол или ресурс",
+        )
         .parse(await body(request));
       await transaction(async (client) => {
         await client.query("SELECT pg_advisory_xact_lock(728411001)");
@@ -961,11 +1027,21 @@ async function handleStaff(request: Request, url: URL) {
         const startsAt = new Date(r.starts_at).toISOString();
         const endsAt = new Date(r.ends_at).toISOString();
         if (input.tableIds) {
-          validateSelection({ startsAt, endsAt, guests: r.guests, tableIds: input.tableIds }, HALL_TABLES, true);
+          validateSelection(
+            { startsAt, endsAt, guests: r.guests, tableIds: input.tableIds },
+            HALL_TABLES,
+            true,
+          );
         } else {
           validateBookingWindow({ startsAt, endsAt }, true);
           const resource = (
-            await client.query<{ code: string; name: string; capacity: number | null; is_reservable: boolean; status: string }>(
+            await client.query<{
+              code: string;
+              name: string;
+              capacity: number | null;
+              is_reservable: boolean;
+              status: string;
+            }>(
               `SELECT r.code,r.name,r.capacity,r.is_reservable,r.status FROM venue_resources r
                JOIN venue_zones z ON z.id=r.zone_id WHERE r.id=$1 AND r.venue_code='xoxo' AND z.is_active`,
               [input.resourceId],
@@ -982,7 +1058,10 @@ async function handleStaff(request: Request, url: URL) {
             "UPDATE command_center_reservations SET table_id=$2,table_label=$3,table_ids=$4,updated_at=now() WHERE id=$1",
             [r.id, input.tableIds[0], input.tableIds.join(" + "), input.tableIds],
           );
-          await client.query("DELETE FROM command_center_reservation_resources WHERE reservation_id=$1", [r.id]);
+          await client.query(
+            "DELETE FROM command_center_reservation_resources WHERE reservation_id=$1",
+            [r.id],
+          );
         } else {
           const resource = (
             await client.query<{ code: string; name: string }>(
@@ -1006,7 +1085,11 @@ async function handleStaff(request: Request, url: URL) {
           [
             `staff:${found.staff_id}`,
             r.id,
-            JSON.stringify({ reason: input.reason, tables: input.tableIds ?? null, resourceId: input.resourceId ?? null }),
+            JSON.stringify({
+              reason: input.reason,
+              tables: input.tableIds ?? null,
+              resourceId: input.resourceId ?? null,
+            }),
           ],
         );
       });

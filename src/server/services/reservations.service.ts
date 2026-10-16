@@ -73,34 +73,37 @@ export async function getTableAvailability(
     [startsAt, endsAt],
   );
   for (const row of held.rows) {
-    if (!byTable.has(row.code)) byTable.set(row.code, { tableId: row.code, status: "booked", reservation: null });
+    if (!byTable.has(row.code))
+      byTable.set(row.code, { tableId: row.code, status: "booked", reservation: null });
   }
   const legacyCodes = new Set(HALL_TABLES.map((table) => table.id));
   const legacyBusy = [...byTable.keys()].some((code) => legacyCodes.has(code));
   const [zonesResult, inventory] = await Promise.all([
-    query<Pick<VenueZoneAvailability, "id" | "code" | "name" | "type" | "description" | "displayOrder">>(
+    query<
+      Pick<VenueZoneAvailability, "id" | "code" | "name" | "type" | "description" | "displayOrder">
+    >(
       `SELECT id,code,name,zone_type AS type,description,display_order AS "displayOrder"
        FROM venue_zones WHERE venue_code='xoxo' AND is_active ORDER BY display_order`,
     ),
     query<{
-    id: string;
-    zone_id: string;
-    zone_code: string;
-    zone_name: string;
-    code: string;
-    name: string;
-    resource_type: "table" | "private_room" | "bar_seating";
-    capacity: number | null;
-    is_reservable: boolean;
-    status: "active" | "inactive" | "maintenance" | "unverified";
-    x: number | null;
-    y: number | null;
-    width: number | null;
-    height: number | null;
-    shape: string | null;
-    rotation: number | null;
+      id: string;
+      zone_id: string;
+      zone_code: string;
+      zone_name: string;
+      code: string;
+      name: string;
+      resource_type: "table" | "private_room" | "bar_seating";
+      capacity: number | null;
+      is_reservable: boolean;
+      status: "active" | "inactive" | "maintenance" | "unverified";
+      x: number | null;
+      y: number | null;
+      width: number | null;
+      height: number | null;
+      shape: string | null;
+      rotation: number | null;
     }>(
-    `SELECT r.id,r.zone_id,z.code AS zone_code,z.name AS zone_name,r.code,r.name,
+      `SELECT r.id,r.zone_id,z.code AS zone_code,z.name AS zone_name,r.code,r.name,
        r.resource_type,r.capacity,r.is_reservable,r.status,l.x,l.y,l.width,l.height,l.shape,l.rotation
      FROM venue_resources r JOIN venue_zones z ON z.id=r.zone_id
      LEFT JOIN venue_layout l ON l.resource_id=r.id
@@ -124,7 +127,11 @@ export async function getTableAvailability(
       resourceType: row.resource_type,
       capacity: row.capacity === null ? null : Number(row.capacity),
       isReservable: bookable,
-      status: !bookable ? "unavailable" as const : available ? "free" as const : "booked" as const,
+      status: !bookable
+        ? ("unavailable" as const)
+        : available
+          ? ("free" as const)
+          : ("booked" as const),
       available,
       layout:
         row.x === null && row.y === null && row.width === null && row.height === null
@@ -163,13 +170,20 @@ export async function createReservation(
       message: "Время окончания должно быть позже начала",
     };
   const table = findTable(input.tableId);
-  let resourceId = input.resourceId;
+  const resourceId = input.resourceId;
   let resourceName: string | null = null;
   let tableId = input.tableId ?? "";
   let tableLabel: string | null = table?.label ?? null;
   let capacity = table?.seats ?? 0;
   if (resourceId) {
-    const result = await query<{ id: string; code: string; name: string; capacity: number | null; is_reservable: boolean; status: string }>(
+    const result = await query<{
+      id: string;
+      code: string;
+      name: string;
+      capacity: number | null;
+      is_reservable: boolean;
+      status: string;
+    }>(
       `SELECT r.id,r.code,r.name,r.capacity,r.is_reservable,r.status
        FROM venue_resources r JOIN venue_zones z ON z.id=r.zone_id
        WHERE r.id=$1 AND r.venue_code='xoxo' AND z.is_active`,
@@ -188,7 +202,11 @@ export async function createReservation(
   if (!table && !resourceId)
     return { ok: false, code: "invalid", message: "Такого места нет в подтверждённой схеме" };
   if (input.guests > capacity)
-    return { ok: false, code: "invalid", message: `Вместимость ${resourceName ?? "стола"} превышена` };
+    return {
+      ok: false,
+      code: "invalid",
+      message: `Вместимость ${resourceName ?? "стола"} превышена`,
+    };
   try {
     const reservation = await reservations.insert(
       { ...input, tableId, tableLabel: tableLabel ?? tableId, resourceId },

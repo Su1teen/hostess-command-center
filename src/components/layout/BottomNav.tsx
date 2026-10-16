@@ -1,7 +1,8 @@
-import { ChefHat, LayoutDashboard, Map as MapIcon, Truck, Users } from "lucide-react";
+import { ChefHat, LayoutDashboard, Map as MapIcon, Truck, Users, ShoppingBag } from "lucide-react";
 import { Link, useRouterState } from "@tanstack/react-router";
 
 const items = [
+  { to: "/orders", label: "Заказы", icon: ShoppingBag },
   { to: "/", label: "Зал", icon: MapIcon },
   { to: "/dashboard", label: "Обзор", icon: LayoutDashboard },
   { to: "/menu", label: "Меню", icon: ChefHat },
