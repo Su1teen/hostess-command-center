@@ -13,13 +13,14 @@ export const quoteInput = z
       )
       .min(1)
       .max(30),
-    redeemMinor: moneySchema.default(0),
+    redeemMinor: moneySchema.optional(),
+    redeemAmount: z.number().finite().nonnegative().max(1_000_000_000).optional(),
   })
   .strict()
   .refine(
     (v) => new Set(v.items.map((i) => i.productId)).size === v.items.length,
     "Duplicate products",
-  );
+  ).refine(v=>v.redeemMinor===undefined || v.redeemAmount===undefined,"Use one redemption unit").transform(v=>({...v,redeemMinor:v.redeemAmount===undefined?(v.redeemMinor??0):toMinor(v.redeemAmount,100_000_000_000)}));
 export const orderInput = z
   .object({ quoteId: z.string().uuid(), idempotencyKey: z.string().min(16).max(128) })
   .strict();
@@ -42,13 +43,13 @@ export function assertTransition(from: OrderStatus, to: OrderStatus) {
   )
     throw new ApiError(409, "INVALID_TRANSITION", "Недопустимый переход статуса");
 }
-export function toMinor(value: number | string) {
+export function toMinor(value: number | string, maximum=1_000_000_000) {
   const text = String(value);
   if (!/^\d+(\.\d{1,2})?$/.test(text))
     throw new ApiError(503, "INVALID_PRICE", "Некорректная цена биржи");
   const [whole, fraction = ""] = text.split(".");
   const result = Number(BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0")));
-  if (!Number.isSafeInteger(result) || result > 1_000_000_000)
+  if (!Number.isSafeInteger(result) || result > maximum)
     throw new ApiError(503, "INVALID_PRICE", "Цена вне допустимого диапазона");
   return result;
 }

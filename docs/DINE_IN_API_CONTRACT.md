@@ -66,3 +66,14 @@ Each payload identifies ONE order line:
 }
 
 unitPrice is an exact KZT decimal string with two fractional digits. The strict XOXO v1 wire payload omits currency and unitPriceMinor; those remain internal Command Center fields. Accept duplicate eventId as a successful 2xx no-op. Keep the originating round identity; receiving a historic accepted order must not silently apply a new round price or insert a second complete order. Quantity is positive for both event types; cancellation semantics come from eventType. Sender waits for accepted delivery before sending cancellation for the same line. The sender requires HTTP success plus accepted=true and the matching eventId. Permanent 4xx failures are retained as terminal failed rows for manual reconciliation. Return 2xx only once the receiver has durably accepted/deduplicated the event.
+
+## Hostess frontend compatibility
+The backend also returns the exact current Hostess client envelopes and KZT display aliases:
+- Table lookup adds venue:{id,slug,name,currency} and table:{resourceId,code,name,zoneName}.
+- Quote accepts redeemAmount in KZT OR redeemMinor in tiyn; sending both is invalid. Guest identity and all totals remain server-owned.
+- Quote adds lines:{productId,productName,quantity,unitPrice,total}[] and subtotal,discount,payable,cashback as KZT numbers.
+- Public orders add orderNumber,createdAt,venueCode,lines and KZT totals. The first checkout places receiptToken both inside order and at the top level for existing consumers.
+- Receipt reads accept the x-hostess-receipt-token header or receiptToken query used by Hostess. Keep no-store/no-referrer; never log these query capabilities or put them in analytics.
+- Wallet adds balance,expiringAmount,nextExpiresAt,lots:[{id,remaining,expiresAt}] in KZT. Transactions also expose signed amount in KZT.
+- GET /api/guest/v1/dine-in/orders returns the authenticated guest's orders and nextCursor. Order and ledger pagination use timestamp|UUID opaque cursors; before also accepts a legacy ISO timestamp.
+Minor fields remain available. KZT aliases are presentation only and never accepted as an authoritative checkout price. tests/contracts/hostess-schema.ts retains the actual consumer schemas as an integration fixture.

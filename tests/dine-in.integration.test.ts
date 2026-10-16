@@ -1,4 +1,5 @@
 import { beforeAll, afterAll, expect, test } from "bun:test";
+import {tableSchema,quoteSchema,orderSchema,walletSchema,transactionSchema} from "./contracts/hostess-schema";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { pool } from "../src/server/db/pool";
@@ -696,4 +697,19 @@ test("outbox requires accepted ACK and retains permanent failures until manager 
       .rows[0].status,
   ).toBe("delivered");
   process.env.DINE_IN_OUTBOX_ENABLED = "no";
+});
+
+test("actual Hostess frontend schema accepts table, quote, order, receipt, wallet and history",async()=>{
+  const g=await guest();await lot(g.id,100000);
+  const tableResult=await (await api("/api/guest/v1/dine-in/tables/"+table.token)).json();
+  expect(tableSchema.parse(tableResult).table.resourceId).toBe(table.resource_id);
+  const qResponse=await api("/api/guest/v1/dine-in/quotes",{qrToken:table.token,items:[{productId,quantity:3}],redeemAmount:1000},{cookie:g.cookie});expect(qResponse.status).toBe(201);
+  const q=quoteSchema.parse(await qResponse.json());expect(q.subtotal).toBe(4770);expect(q.discount).toBe(1000);expect(q.payable).toBe(3770);expect(q.cashback).toBe(113);
+  const response=await api("/api/guest/v1/dine-in/orders",{quoteId:q.id,idempotencyKey:randomToken()},{cookie:g.cookie});expect(response.status).toBe(201);
+  const o=orderSchema.parse((await response.json()).order);expect(o.venueCode).toBe("xoxo");expect(o.lines[0].unitPrice).toBe(1590);expect(o.cashback).toBe(113);expect(o.receiptToken).toBeDefined();
+  const receipt=await api("/api/guest/v1/dine-in/orders/"+o.id+"?receiptToken="+o.receiptToken);expect(receipt.status).toBe(200);expect(orderSchema.parse((await receipt.json()).order).id).toBe(o.id);
+  const wallet=walletSchema.parse(await (await api("/api/guest/v1/loyalty/wallet",undefined,{cookie:g.cookie})).json());expect(wallet.balance).toBe(113);expect(wallet.lots.length).toBe(1);
+  const transactions=(await (await api("/api/guest/v1/loyalty/transactions",undefined,{cookie:g.cookie})).json()).transactions;
+  expect(transactions.every((t:unknown)=>transactionSchema.safeParse(t).success)).toBe(true);
+  const history=await (await api("/api/guest/v1/dine-in/orders",undefined,{cookie:g.cookie})).json();expect(history.orders.some((item:unknown)=>orderSchema.parse(item).id===o.id)).toBe(true);
 });

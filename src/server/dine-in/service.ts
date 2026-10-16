@@ -125,12 +125,12 @@ export async function createQuote(owner: Owner, raw: unknown) {
 export async function orderDetail(client: Pick<PoolClient, "query">, id: string, venueId: string) {
   const row = (
     await client.query(
-      `SELECT o.id,o.number::text,o.venue_id AS "venueId",o.guest_id AS "guestId",r.code AS "tableCode",r.name AS "tableName",z.name AS "zoneName",
+      `SELECT o.id,o.number::text,o.venue_id AS "venueId",v.slug AS "venueCode",o.guest_id AS "guestId",r.code AS "tableCode",r.name AS "tableName",z.name AS "zoneName",
     g.name AS "guestName",g.phone AS "guestPhone",o.status,o.payment_status AS "paymentStatus",o.manual_payment_at AS "manualPaymentAt",o.accepted_at AS "acceptedAt",
-    o.subtotal_minor::text AS "subtotalMinor",o.discount_minor::text AS "discountMinor",o.payable_minor::text AS "payableMinor",o.cashback_minor::text AS "cashbackMinor",
+    (SELECT l.expires_at FROM loyalty_lots l WHERE l.order_id=o.id) AS "cashbackExpiresAt",o.subtotal_minor::text AS "subtotalMinor",o.discount_minor::text AS "discountMinor",o.payable_minor::text AS "payableMinor",o.cashback_minor::text AS "cashbackMinor",
     (SELECT COALESCE(jsonb_agg(jsonb_build_object('id',i.id,'productId',i.exchange_product_id,'name',i.name,'quantity',i.quantity,'unitPriceMinor',i.unit_price_minor::text,'totalMinor',i.total_minor::text,'roundId',i.round_id) ORDER BY i.id),'[]') FROM dine_in_order_items i WHERE i.order_id=o.id) AS items,
     (SELECT COALESCE(jsonb_agg(jsonb_build_object('id',e.id,'type',e.type,'actor',e.actor,'details',e.details,'createdAt',e.created_at) ORDER BY e.created_at,e.id),'[]') FROM dine_in_order_events e WHERE e.order_id=o.id) AS events
-    FROM dine_in_orders o JOIN venue_resources r ON r.id=o.table_resource_id JOIN venue_zones z ON z.id=r.zone_id
+    FROM dine_in_orders o JOIN hostess_venues v ON v.id=o.venue_id JOIN venue_resources r ON r.id=o.table_resource_id JOIN venue_zones z ON z.id=r.zone_id
     LEFT JOIN hostess_guests g ON g.id=o.guest_id WHERE o.id=$1 AND o.venue_id=$2`,
       [id, venueId],
     )
