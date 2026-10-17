@@ -60,8 +60,6 @@ export type VenueResourceRow = {
   display_properties: Record<string, unknown>;
 };
 
-const LEGACY_CODES = new Set(["A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2", "Bar"]);
-
 export async function listVenueAvailability(
   db: Queryable,
   startsAt: string,
@@ -96,7 +94,14 @@ export async function listVenueAvailability(
   ]);
 
   const busy = new Set<string>(busyResult.rows.map((row) => String(row.code)));
-  const legacyBusy = [...busy].some((code) => LEGACY_CODES.has(code));
+  const physicalBusy = new Set<string>(
+    (
+      await db.query(
+        "SELECT code FROM venue_resources WHERE venue_code='xoxo' AND hostess_inventory_conflicts(ARRAY[code],$1::text[])",
+        [[...busy]],
+      )
+    ).rows.map((r) => r.code),
+  );
   const zones = new Map<string, VenueAvailabilityZone>();
   const resources: VenueAvailabilityResource[] = [];
 
@@ -123,7 +128,7 @@ export async function listVenueAvailability(
     if (!zone) continue;
     if (!row.id) continue;
     const bookable = row.is_reservable && row.status === "active" && row.capacity !== null;
-    const occupied = busy.has(row.code) || legacyBusy;
+    const occupied = physicalBusy.has(row.code);
     const fitsGuestCount = guests === null || (row.capacity !== null && row.capacity >= guests);
     const resource: VenueAvailabilityResource = {
       id: row.id,
@@ -139,7 +144,7 @@ export async function listVenueAvailability(
       bookable,
       fitsGuestCount,
       unavailableReason: occupied
-        ? legacyBusy && !busy.has(row.code)
+        ? !busy.has(row.code)
           ? "legacy_mapping"
           : "occupied"
         : !bookable
@@ -190,25 +195,12 @@ export async function selectReservableResource(
        AND NOT EXISTS (
          SELECT 1 FROM command_center_reservations b
          WHERE b.status NOT IN ('cancelled','no_show')
-           AND COALESCE(b.table_ids,CASE WHEN b.table_id IS NULL THEN '{}'::text[] ELSE ARRAY[b.table_id] END)
-             && CASE WHEN $2::uuid IS NOT NULL THEN ARRAY[r.code] ELSE ARRAY[r.code] END
+           AND hostess_inventory_conflicts(COALESCE(b.table_ids,CASE WHEN b.table_id IS NULL THEN '{}'::text[] ELSE ARRAY[b.table_id] END),ARRAY[r.code])
            AND b.starts_at<$5 AND COALESCE(b.ends_at,b.starts_at+interval '2 hours')>$4
        )
        AND NOT EXISTS (
          SELECT 1 FROM hostess_holds h WHERE h.consumed_at IS NULL AND h.expires_at>now()
-           AND r.code=ANY(h.table_ids) AND h.starts_at<$5 AND h.ends_at>$4
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM command_center_reservations b
-         WHERE b.status NOT IN ('cancelled','no_show')
-           AND COALESCE(b.table_ids,CASE WHEN b.table_id IS NULL THEN '{}'::text[] ELSE ARRAY[b.table_id] END)
-             && ARRAY['A1','A2','A3','B1','B2','B3','B4','C1','C2','Bar']::text[]
-           AND b.starts_at<$5 AND COALESCE(b.ends_at,b.starts_at+interval '2 hours')>$4
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM hostess_holds h WHERE h.consumed_at IS NULL AND h.expires_at>now()
-           AND h.table_ids && ARRAY['A1','A2','A3','B1','B2','B3','B4','C1','C2','Bar']::text[]
-           AND h.starts_at<$5 AND h.ends_at>$4
+           AND hostess_inventory_conflicts(ARRAY[r.code],h.table_ids) AND h.starts_at<$5 AND h.ends_at>$4
        )
      ORDER BY r.capacity ASC,z.display_order,r.code
      LIMIT 1 FOR UPDATE OF r`,

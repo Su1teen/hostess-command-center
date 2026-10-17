@@ -22,7 +22,7 @@ try {
   for (const suite of ["booking", "dine-in", "migrations"]) {
     // Windows Bun 1.3.13 stalls pg callbacks on concurrent checkout; exercise the
     // same fixtures under the production Node runtime in their own local schema.
-    if (suite === "dine-in") {
+    if (suite === "dine-in" && process.platform === "win32") {
       try {
         run(process.execPath, ["scripts/test-node-dining.mjs"], { TEST_DATABASE_URL: raw });
       } catch (error) {

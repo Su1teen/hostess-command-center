@@ -3,7 +3,7 @@ import qrcodegen from "./vendor/qrcodegen";
 import { hostessPublicOrigin } from "../guest/security";
 
 export function tableUrl(code: string, token: string) {
-  const origin = hostessPublicOrigin();
+  const origin = hostessPublicOrigin(process.env.HOSTESS_PUBLIC_ORIGIN ?? "https://hostes.online");
   return `${origin}/v/xoxo/t/${encodeURIComponent(code)}/${token}`;
 }
 function matrix(url: string) {

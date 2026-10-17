@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { test as nodeTest, before, after } from "node:test";
 export const beforeAll = before;
 export const afterAll = after;
-export const test = (name: string, fn: () => unknown) => nodeTest(name, { timeout: 20000 }, fn);
+const runTest = (name: string, fn: () => unknown) => nodeTest(name, { timeout: 20000 }, fn);
+export const test = Object.assign(runTest, {
+  skipIf: (skip: boolean) => (name: string, fn: () => unknown) =>
+    nodeTest(name, { timeout: 20000, skip }, fn),
+});
 function subset(actual: unknown, expected: unknown): boolean {
   if (!expected || typeof expected !== "object") return Object.is(actual, expected);
   return (
@@ -22,6 +26,7 @@ type Matchers = {
   };
   toBe(expected: unknown): void;
   toEqual(expected: unknown): void;
+  toContain(expected: string): void;
   toBeNull(): void;
   toBeUndefined(): void;
   toBeDefined(): void;
@@ -52,6 +57,9 @@ export function expect(actual: unknown, negate = false): Matchers {
     toEqual(expected: unknown) {
       if (negate) assert.notDeepEqual(actual, expected);
       else assert.deepEqual(actual, expected);
+    },
+    toContain(expected: string) {
+      check(typeof actual === "string" && actual.includes(expected));
     },
     toBeNull() {
       check(actual === null);

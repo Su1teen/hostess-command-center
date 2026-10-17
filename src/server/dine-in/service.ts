@@ -328,7 +328,12 @@ export async function changeStatus(
       ]);
       await event(client, order, actor, target);
     }
-    if (manualPayment && !order.manual_payment_at && order.status !== "cancelled") {
+    if (
+      manualPayment &&
+      !cancelReason &&
+      !order.manual_payment_at &&
+      order.status !== "cancelled"
+    ) {
       await client.query(
         "UPDATE dine_in_orders SET manual_payment_at=now(),manual_payment_by=$2,updated_at=now() WHERE id=$1",
         [id, staffId],

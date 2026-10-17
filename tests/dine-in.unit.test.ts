@@ -183,4 +183,18 @@ describe("real QR exports", () => {
       "https://hostes.online/v/xoxo/t/03/" + "a".repeat(43),
     );
   });
+  test("public URL fallback uses the real host without changing QR credentials", () => {
+    const previous = process.env.HOSTESS_PUBLIC_ORIGIN;
+    delete process.env.HOSTESS_PUBLIC_ORIGIN;
+    try {
+      const token = "a".repeat(64);
+      for (let n = 1; n <= 17; n++) {
+        const code = String(n).padStart(2, "0");
+        expect(tableUrl(code, token)).toBe(`https://hostes.online/v/xoxo/t/${code}/${token}`);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.HOSTESS_PUBLIC_ORIGIN;
+      else process.env.HOSTESS_PUBLIC_ORIGIN = previous;
+    }
+  });
 });

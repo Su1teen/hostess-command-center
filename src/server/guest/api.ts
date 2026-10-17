@@ -110,19 +110,21 @@ async function availability(
 ) {
   intervalSchema.parse({ startsAt, endsAt });
   const busy = await pool.query(
-    `WITH occupied AS (SELECT unnest(COALESCE(table_ids,ARRAY[table_id])) AS id
+    `SELECT unnest(COALESCE(table_ids,ARRAY[table_id])) AS id
     FROM command_center_reservations WHERE status NOT IN ('cancelled','no_show')
       AND starts_at<$2 AND COALESCE(ends_at,starts_at+interval '2 hours')>$1
     UNION SELECT unnest(table_ids) FROM hostess_holds WHERE consumed_at IS NULL AND expires_at>now()
-      AND guest_id IS DISTINCT FROM $3::uuid AND starts_at<$2 AND ends_at>$1)
-    SELECT id,EXISTS(SELECT 1 FROM venue_resources vr WHERE vr.venue_code='xoxo'
-      AND vr.code=occupied.id AND vr.is_reservable AND vr.status='active') AS normalized
-    FROM occupied`,
+      AND guest_id IS DISTINCT FROM $3::uuid AND starts_at<$2 AND ends_at>$1`,
     [startsAt, endsAt, guestId],
   );
-  const occupied = new Set(busy.rows.map((r) => r.id));
-  // The database blocks legacy and normalized reservations until a physical mapping exists.
-  const normalizedBusy = busy.rows.some((r) => r.normalized);
+  const occupied = new Set(
+    (
+      await pool.query(
+        "SELECT code FROM unnest($1::text[]) AS t(code) WHERE hostess_inventory_conflicts(ARRAY[code],$2::text[])",
+        [HALL_TABLES.map((t) => t.id), busy.rows.map((r) => r.id)],
+      )
+    ).rows.map((r) => r.code),
+  );
   const inventory = await listVenueAvailability(pool, startsAt, endsAt, guests, guestId);
   return {
     startsAt,
@@ -131,7 +133,7 @@ async function availability(
     width: FLOOR_WIDTH,
     height: FLOOR_HEIGHT,
     screens: TV_SCREENS,
-    tables: HALL_TABLES.map((t) => ({ ...t, available: !occupied.has(t.id) && !normalizedBusy })),
+    tables: HALL_TABLES.map((t) => ({ ...t, available: !occupied.has(t.id) })),
     zones: inventory.zones,
     resources: inventory.resources,
   };
