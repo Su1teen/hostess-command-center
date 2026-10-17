@@ -141,6 +141,7 @@ describe("canonical reservation transactions", () => {
     expect(available.status).toBe(200);
     expect(rooms.get("VIP2")?.fitsGuestCount).toBe(true);
     expect(rooms.get("VIP3")?.fitsGuestCount).toBe(false);
+    expect((rooms.get("VIP3") as { available: boolean }).available).toBe(false);
 
     const key = randomToken();
     const selection = { ...window, guests: 8, resourceId: vip2, idempotencyKey: key };
@@ -369,7 +370,7 @@ describe("WhatsApp magic links", () => {
           wa,
         )
       ).status,
-    ).toBe(403);
+    ).toBe(200);
   });
 });
 
@@ -750,4 +751,176 @@ describe("guest mutations retry safely", () => {
       (await api("/profile", undefined, { cookie: guest.cookie })).data.reservations[0].status,
     ).toBe("cancelled");
   });
+});
+
+describe("independent booking audit regressions", () => {
+  test("normalized occupancy suppresses all legacy offers and legacy occupancy suppresses resources", async () => {
+    const a = await bootstrap(),
+      b = await bootstrap();
+    const vip = (
+      await pool.query("SELECT id FROM venue_resources WHERE code='VIP1' AND venue_code='xoxo'")
+    ).rows[0].id;
+    const window = interval(45);
+    const selection = { ...window, resourceId: vip, guests: 3 };
+    const booked = await api(
+      "/reservations",
+      { selection, idempotencyKey: randomToken() },
+      { cookie: a.cookie },
+    );
+    expect(booked.status).toBe(201);
+    const query = `/availability?startsAt=${window.startsAt}&endsAt=${window.endsAt}&guests=3`;
+    const blockedLegacy = await api(query, undefined, { cookie: b.cookie });
+    expect(blockedLegacy.data.tables.every((t: { available: boolean }) => !t.available)).toBe(true);
+    const denied = await api(
+      "/reservations",
+      {
+        selection: { ...window, tableIds: ["A1"], guests: 3 },
+        idempotencyKey: randomToken(),
+      },
+      { cookie: b.cookie },
+    );
+    expect(denied.status).toBe(409);
+    await pool.query("UPDATE command_center_reservations SET status='cancelled' WHERE id=$1", [
+      booked.data.reservation.id,
+    ]);
+    const legacy = await api(
+      "/reservations",
+      {
+        selection: { ...window, tableIds: ["A1"], guests: 3 },
+        idempotencyKey: randomToken(),
+      },
+      { cookie: b.cookie },
+    );
+    expect(legacy.status).toBe(201);
+    const blockedResources = await api(query, undefined, { cookie: a.cookie });
+    expect(blockedResources.data.resources.every((r: { available: boolean }) => !r.available)).toBe(
+      true,
+    );
+    expect(blockedResources.data.tables.find((t: { id: string }) => t.id === "A2").available).toBe(
+      true,
+    );
+  });
+  test("concurrent retry persists one reservation and changed payload is rejected", async () => {
+    const wa = { wa: true, jid: "70000000088@c.us" };
+    const guest = await api(
+      "/identity",
+      { name: "Audit identity", jid: wa.jid, consent: true },
+      wa,
+    );
+    const payload = {
+      guestId: guest.data.guestId,
+      idempotencyKey: randomToken(),
+      selection: { ...interval(46), guests: 3, tableIds: ["B1"] },
+    };
+    const replies = await Promise.all([
+      api("/reservations", payload, wa),
+      api("/reservations", payload, wa),
+    ]);
+    expect(replies.map((r) => r.status)).toEqual([201, 201]);
+    expect(replies[0].data.reservation.id).toBe(replies[1].data.reservation.id);
+    const rows = await pool.query(
+      "SELECT count(*)::int AS n FROM command_center_reservations WHERE guest_id=$1",
+      [guest.data.guestId],
+    );
+    expect(rows.rows[0].n).toBe(1);
+    const mismatch = await api(
+      "/reservations",
+      { ...payload, selection: { ...payload.selection, guests: 4 } },
+      wa,
+    );
+    expect(mismatch.status).toBe(409);
+    expect(mismatch.data.error.code).toBe("IDEMPOTENCY_MISMATCH");
+    expect(replies[0].data.reservation.status).toBe("expected");
+  });
+});
+test("failed link generation preserves saved booking and canonical claim establishes same guest", async () => {
+  const wa = { wa: true, jid: "70000000089@c.us" };
+  const identity = await api("/identity", { name: "Audit link", jid: wa.jid, consent: true }, wa);
+  const guestId = identity.data.guestId;
+  const booked = await api(
+    "/reservations",
+    {
+      guestId,
+      idempotencyKey: randomToken(),
+      selection: { ...interval(47), guests: 3, tableIds: ["C1"] },
+    },
+    wa,
+  );
+  expect(booked.status).toBe(201);
+  const reservationId = booked.data.reservation.id;
+  const original = process.env.HOSTESS_PUBLIC_ORIGIN;
+  try {
+    process.env.HOSTESS_PUBLIC_ORIGIN = "https://hostess.online";
+    expect((await api("/links", { guestId, reservationId }, wa)).status).toBe(503);
+    expect(
+      (
+        await pool.query("SELECT status FROM command_center_reservations WHERE id=$1", [
+          reservationId,
+        ])
+      ).rows[0].status,
+    ).toBe("expected");
+    process.env.HOSTESS_PUBLIC_ORIGIN = "https://hostes.online";
+    const link = await api("/links", { guestId, reservationId }, wa);
+    expect(link.status).toBe(200);
+    expect(link.data.deliverTo).toBe(wa.jid);
+    const url = new URL(link.data.url);
+    expect(url.origin).toBe("https://hostes.online");
+    expect(url.pathname).toBe("/auth/claim");
+    expect(url.search).toBe("");
+    const token = new URLSearchParams(url.hash.slice(1)).get("token");
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const claimed = await api("/claims", { token });
+    expect(claimed.status).toBe(200);
+    const profile = await api("/profile", undefined, { cookie: claimed.cookie });
+    expect(profile.data.guest.id).toBe(guestId);
+    expect(profile.data.reservations.some((r: { id: string }) => r.id === reservationId)).toBe(
+      true,
+    );
+  } finally {
+    process.env.HOSTESS_PUBLIC_ORIGIN = original;
+  }
+});
+
+test("first ownership verification replays same result only for proven owner within challenge TTL", async () => {
+  const wa = { wa: true, jid: "70000000090@c.us" };
+  const provisional = await api("/bootstrap", {
+    name: "Audit ownership",
+    phone: "+70000000090",
+    consent: true,
+  });
+  const proof = await api("/ownership", {}, { cookie: provisional.cookie });
+  const payload = {
+    name: "Audit ownership",
+    jid: wa.jid,
+    consent: true,
+    claimCode: proof.data.claimCode,
+  };
+  const first = await api("/identity", payload, wa);
+  const retry = await api("/identity", payload, wa);
+  expect(first.status).toBe(200);
+  expect(retry.status).toBe(200);
+  expect(first.data.guestId).toBe(provisional.data.guestId);
+  expect(retry.data.guestId).toBe(first.data.guestId);
+  expect(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM hostess_audit WHERE entity_id=$1 AND action='identity_verified'",
+        [first.data.guestId],
+      )
+    ).rows[0].n,
+  ).toBe(1);
+  expect(
+    (
+      await pool.query("SELECT count(*)::int AS n FROM hostess_guest_identities WHERE subject=$1", [
+        wa.jid,
+      ])
+    ).rows[0].n,
+  ).toBe(1);
+  const wrong = { wa: true, jid: "70000000091@c.us" };
+  expect((await api("/identity", { ...payload, jid: wrong.jid }, wrong)).status).toBe(403);
+  await pool.query(
+    "UPDATE hostess_ownership_challenges SET expires_at=now()-interval '1 second' WHERE token_hash=$1",
+    [hash(proof.data.claimCode)],
+  );
+  expect((await api("/identity", payload, wa)).status).toBe(403);
 });

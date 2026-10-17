@@ -1,12 +1,10 @@
 import { deflateSync } from "node:zlib";
 import qrcodegen from "./vendor/qrcodegen";
-import { ApiError } from "../guest/security";
+import { hostessPublicOrigin } from "../guest/security";
 
 export function tableUrl(code: string, token: string) {
-  const origin = new URL(process.env.HOSTESS_PUBLIC_ORIGIN ?? "https://hostess.online");
-  if (origin.protocol !== "https:")
-    throw new ApiError(503, "CONFIG_REQUIRED", "Публичный адрес должен использовать HTTPS");
-  return `${origin.origin}/v/xoxo/t/${encodeURIComponent(code)}/${token}`;
+  const origin = hostessPublicOrigin();
+  return `${origin}/v/xoxo/t/${encodeURIComponent(code)}/${token}`;
 }
 function matrix(url: string) {
   return qrcodegen.QrCode.encodeText(url, qrcodegen.QrCode.Ecc.MEDIUM);

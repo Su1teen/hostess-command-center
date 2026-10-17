@@ -20,6 +20,17 @@ function run(cmd, args, env) {
 }
 try {
   for (const suite of ["booking", "dine-in", "migrations"]) {
+    // Windows Bun 1.3.13 stalls pg callbacks on concurrent checkout; exercise the
+    // same fixtures under the production Node runtime in their own local schema.
+    if (suite === "dine-in") {
+      try {
+        run(process.execPath, ["scripts/test-node-dining.mjs"], { TEST_DATABASE_URL: raw });
+      } catch (error) {
+        failed = true;
+        console.error(error.message);
+      }
+      continue;
+    }
     const schema = "hostess_test_" + randomUUID().replaceAll("-", "");
     await pool.query(`CREATE SCHEMA ${schema}`);
     const scoped = new URL(raw);
@@ -35,7 +46,7 @@ try {
       COMMAND_CENTER_SERVICE_KEY: "s".repeat(43),
       EXCHANGE_API_ORIGIN: "http://127.0.0.1:19092",
       COMMAND_CENTER_ORIGIN: "https://command.test",
-      HOSTESS_PUBLIC_ORIGIN: "https://hostess.online",
+      HOSTESS_PUBLIC_ORIGIN: "https://hostes.online",
       DINE_IN_ENABLED: suite === "dine-in" ? "yes" : "no",
       DINE_IN_PILOT_ASSUMED_PAID: "yes",
       DINE_IN_OUTBOX_ENABLED: "no",

@@ -135,7 +135,7 @@ export async function listVenueAvailability(
       resourceType: row.resource_type,
       capacity: row.capacity,
       status: occupied ? "reserved" : bookable ? "free" : "unavailable",
-      available: bookable && !occupied,
+      available: bookable && !occupied && fitsGuestCount,
       bookable,
       fitsGuestCount,
       unavailableReason: occupied

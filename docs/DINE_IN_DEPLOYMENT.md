@@ -6,7 +6,7 @@ Use the existing Railway project hostess / production / hostess-command-center a
 |---|---|
 | DATABASE_URL | existing Command Center PostgreSQL URL; preserve |
 | COMMAND_CENTER_ORIGIN | existing exact production origin; staff CSRF check |
-| HOSTESS_PUBLIC_ORIGIN | https://hostess.online |
+| HOSTESS_PUBLIC_ORIGIN | https://hostes.online |
 | EXCHANGE_API_ORIGIN | https://hostess-xoxo-production.up.railway.app |
 | HOSTESS_BFF_KEY | existing shared BFF credential, server-only; preserve |
 | WHATSAPP_SERVICE_KEY | existing WhatsApp credential; preserve |

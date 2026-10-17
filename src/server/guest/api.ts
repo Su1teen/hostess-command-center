@@ -28,6 +28,7 @@ import {
   validateSelection,
   verifyPassword,
   whatsappSubject,
+  hostessPublicOrigin,
 } from "./security";
 
 const prefix = "/api/guest/v1";
@@ -109,14 +110,19 @@ async function availability(
 ) {
   intervalSchema.parse({ startsAt, endsAt });
   const busy = await pool.query(
-    `SELECT unnest(COALESCE(table_ids,ARRAY[table_id])) AS id
+    `WITH occupied AS (SELECT unnest(COALESCE(table_ids,ARRAY[table_id])) AS id
     FROM command_center_reservations WHERE status NOT IN ('cancelled','no_show')
       AND starts_at<$2 AND COALESCE(ends_at,starts_at+interval '2 hours')>$1
     UNION SELECT unnest(table_ids) FROM hostess_holds WHERE consumed_at IS NULL AND expires_at>now()
-      AND guest_id IS DISTINCT FROM $3::uuid AND starts_at<$2 AND ends_at>$1`,
+      AND guest_id IS DISTINCT FROM $3::uuid AND starts_at<$2 AND ends_at>$1)
+    SELECT id,EXISTS(SELECT 1 FROM venue_resources vr WHERE vr.venue_code='xoxo'
+      AND vr.code=occupied.id AND vr.is_reservable AND vr.status='active') AS normalized
+    FROM occupied`,
     [startsAt, endsAt, guestId],
   );
   const occupied = new Set(busy.rows.map((r) => r.id));
+  // The database blocks legacy and normalized reservations until a physical mapping exists.
+  const normalizedBusy = busy.rows.some((r) => r.normalized);
   const inventory = await listVenueAvailability(pool, startsAt, endsAt, guests, guestId);
   return {
     startsAt,
@@ -125,7 +131,7 @@ async function availability(
     width: FLOOR_WIDTH,
     height: FLOOR_HEIGHT,
     screens: TV_SCREENS,
-    tables: HALL_TABLES.map((t) => ({ ...t, available: !occupied.has(t.id) })),
+    tables: HALL_TABLES.map((t) => ({ ...t, available: !occupied.has(t.id) && !normalizedBusy })),
     zones: inventory.zones,
     resources: inventory.resources,
   };
@@ -233,6 +239,26 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
         }
         let provisionalId: string | undefined;
         if (input.claimCode) {
+          // A network retry may arrive after the transfer committed. Return only
+          // the previously proved result for this same verified WhatsApp owner;
+          // never consume a used challenge for a different guest or sender.
+          if (existing.rows[0]) {
+            const replay = await client.query(
+              `SELECT c.guest_id FROM hostess_ownership_challenges c
+               JOIN hostess_guests g ON g.id=c.guest_id
+               WHERE c.token_hash=$1 AND c.consumed_at IS NOT NULL AND c.expires_at>now()
+                 AND g.phone=$2 AND (c.guest_id=$3::uuid OR EXISTS (
+                   SELECT 1 FROM hostess_audit a WHERE a.entity_id=$3::uuid::text
+                     AND a.action='provisional_merged'
+                     AND a.details->>'provisionalId'=c.guest_id::text
+                 )) FOR UPDATE OF c`,
+              [hash(input.claimCode), identity.phone, existing.rows[0].guest_id],
+            );
+            if (replay.rows[0]) {
+              await mergeVerifiedStaffGuests(client, existing.rows[0].guest_id, identity.phone);
+              return existing.rows[0].guest_id as string;
+            }
+          }
           const challenge = await client.query(
             `UPDATE hostess_ownership_challenges SET consumed_at=now()
             WHERE token_hash=$1 AND consumed_at IS NULL AND expires_at>now() RETURNING guest_id`,
@@ -292,6 +318,11 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
           await client.query(
             `INSERT INTO hostess_phone_verifications(guest_id,phone,identity_id) VALUES($1,$2,$3)`,
             [provisionalId, identity.phone, identityRow.rows[0].id],
+          );
+          await client.query(
+            `INSERT INTO hostess_audit(actor,action,entity_id,details)
+             VALUES('whatsapp','identity_verified',$1,'{"method":"ownership_challenge"}'::jsonb)`,
+            [provisionalId],
           );
           await mergeVerifiedStaffGuests(client, provisionalId, identity.phone);
           return provisionalId;
@@ -462,9 +493,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
         .strict()
         .parse(data);
       await rateLimit(`link:${guestId}`, 3);
-      const origin = process.env.HOSTESS_PUBLIC_ORIGIN;
-      if (!origin || new URL(origin).protocol !== "https:")
-        throw new ApiError(503, "CONFIG_REQUIRED", "Домен Hostess не настроен");
+      const origin = hostessPublicOrigin();
       if (input.reservationId) {
         const own = await pool.query(
           "SELECT id FROM command_center_reservations WHERE id=$1 AND guest_id=$2",
@@ -480,7 +509,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
       );
       // Fragment is never sent to servers, referrers, or preview crawlers.
       return json({
-        url: `${new URL(origin).origin}/auth/claim#token=${token}`,
+        url: `${origin}/auth/claim#token=${token}`,
         expiresIn: 720,
         deliverTo: whatsappSubject(request.headers.get("x-whatsapp-sender-jid") ?? "").subject,
       });

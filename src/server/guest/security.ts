@@ -12,6 +12,23 @@ export class ApiError extends Error {
 }
 export const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 export const randomToken = () => randomBytes(32).toString("base64url");
+export function hostessPublicOrigin(value = process.env.HOSTESS_PUBLIC_ORIGIN) {
+  try {
+    const url = new URL(value ?? "");
+    if (
+      url.origin !== "https://hostes.online" ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    )
+      throw new Error("Invalid public origin");
+    return url.origin;
+  } catch {
+    throw new ApiError(503, "CONFIG_REQUIRED", "Домен Hostess не настроен");
+  }
+}
 export function equalSecret(a: string | null | undefined, b: string | undefined) {
   if (!a || !b || b.length < 32) return false;
   return timingSafeEqual(Buffer.from(hash(a), "hex"), Buffer.from(hash(b), "hex"));

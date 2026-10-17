@@ -5,6 +5,15 @@ const required = [
   "hostess_holds",
   "hostess_quotes",
   "hostess_rate_limits",
+  "hostess_guest_identities",
+  "hostess_phone_verifications",
+  "hostess_idempotency",
+  "hostess_magic_links",
+  "venue_zones",
+  "venue_resources",
+  "hostess_hold_resources",
+  "command_center_reservation_resources",
+  "hostess_hold_idempotency",
 ];
 const report = { configuration: {}, missingTables: [], migrationApplied: false, ready: false };
 for (const key of ["HOSTESS_PUBLIC_ORIGIN", "COMMAND_CENTER_ORIGIN", "EXCHANGE_API_ORIGIN"]) {
@@ -16,13 +25,20 @@ for (const key of ["HOSTESS_PUBLIC_ORIGIN", "COMMAND_CENTER_ORIGIN", "EXCHANGE_A
       !u.password &&
       u.pathname === "/" &&
       !u.search &&
-      !u.hash;
+      !u.hash &&
+      (key !== "HOSTESS_PUBLIC_ORIGIN" || u.origin === "https://hostes.online");
   } catch {
     report.configuration[key] = false;
   }
 }
 for (const key of ["HOSTESS_BFF_KEY", "WHATSAPP_SERVICE_KEY", "COMMAND_CENTER_SERVICE_KEY"])
   report.configuration[key] = (process.env[key]?.length ?? 0) >= 32;
+report.configuration.SERVICE_KEYS_DISTINCT =
+  new Set([
+    process.env.HOSTESS_BFF_KEY,
+    process.env.WHATSAPP_SERVICE_KEY,
+    process.env.COMMAND_CENTER_SERVICE_KEY,
+  ]).size === 3;
 report.configuration.EXCHANGE_DATA_MODE = process.env.EXCHANGE_DATA_MODE === "api";
 try {
   const users = JSON.parse(process.env.STAFF_USERS_JSON ?? "null");
@@ -64,7 +80,7 @@ try {
     if (history.rows[0].present)
       report.migrationApplied = (
         await client.query(
-          "SELECT EXISTS(SELECT 1 FROM command_center_migrations WHERE name='0003_guest_booking.sql') AS applied",
+          "SELECT count(*)=3 AS applied FROM command_center_migrations WHERE name IN ('0003_guest_booking.sql','0004_venue_inventory.sql','0005_fix_normalized_resource_links.sql')",
         )
       ).rows[0].applied;
     await client.query("ROLLBACK");

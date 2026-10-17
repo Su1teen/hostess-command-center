@@ -10,6 +10,42 @@ import {
   type Snapshot,
 } from "../src/server/dine-in/domain";
 import { qrPng, qrSvg, zipFiles, crc32, tableUrl, printPanels } from "../src/server/dine-in/qr";
+import { hostessPublicOrigin, validateBookingWindow } from "../src/server/guest/security";
+
+describe("booking audit regressions", () => {
+  test("only canonical HTTPS root can issue public capabilities", () => {
+    expect(hostessPublicOrigin("https://hostes.online/")).toBe("https://hostes.online");
+    for (const origin of [
+      undefined,
+      "https://hostess.online",
+      "http://hostes.online",
+      "https://hostes.online.evil.test",
+      "https://user:pass@hostes.online",
+      "https://hostes.online/auth/claim",
+      "https://hostes.online/?redirect=evil",
+      "https://hostes.online/#token=evil",
+      "https://hostes.online:444",
+    ])
+      expect(() => hostessPublicOrigin(origin ?? "")).toThrow();
+  });
+  test("venue service day permits midnight and ends at 04:00 local", () => {
+    const day = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+    const noon = new Date(`${day}T12:00:00.000Z`);
+    const localHour = Number(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Almaty",
+        hour: "2-digit",
+        hourCycle: "h23",
+      }).format(noon),
+    );
+    const at = (hour: number) =>
+      new Date(noon.getTime() + (hour - localHour) * 3600000).toISOString();
+    expect(() => validateBookingWindow({ startsAt: at(23), endsAt: at(26) })).not.toThrow();
+    expect(() => validateBookingWindow({ startsAt: at(26), endsAt: at(28) })).not.toThrow();
+    expect(() => validateBookingWindow({ startsAt: at(27), endsAt: at(28.5) })).toThrow();
+    expect(() => validateBookingWindow({ startsAt: at(13), endsAt: at(15) })).toThrow();
+  });
+});
 const now = Date.now(),
   id = "11111111-1111-4111-8111-111111111111";
 const sample: Snapshot = {
@@ -107,7 +143,7 @@ describe("quote and service state", () => {
   });
 });
 describe("real QR exports", () => {
-  const url = "https://hostess.online/v/xoxo/t/03/" + "a".repeat(64);
+  const url = "https://hostes.online/v/xoxo/t/03/" + "a".repeat(64);
   test("SVG modules and quiet zone", () => {
     const svg = qrSvg(url);
     expect(svg).toContain('shape-rendering="crispEdges"');
@@ -142,9 +178,9 @@ describe("real QR exports", () => {
     expect(html).toContain("@page");
   });
   test("permanent public URL", () => {
-    process.env.HOSTESS_PUBLIC_ORIGIN = "https://hostess.online";
+    process.env.HOSTESS_PUBLIC_ORIGIN = "https://hostes.online";
     expect(tableUrl("03", "a".repeat(43))).toBe(
-      "https://hostess.online/v/xoxo/t/03/" + "a".repeat(43),
+      "https://hostes.online/v/xoxo/t/03/" + "a".repeat(43),
     );
   });
 });
