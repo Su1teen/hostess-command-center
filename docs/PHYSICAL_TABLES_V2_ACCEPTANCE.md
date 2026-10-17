@@ -119,3 +119,19 @@ error. Confirm capacities and whether each VIP QR represents an entire existing
 VIP room or a separate table within that zone. Select an existing VIP room only
 when physically identical, and record the verification basis. Until then keep the
 relationship pending. QR orders continue to work while booking is unconfigured.
+
+## Verified production release
+
+[PR #4](https://github.com/Su1teen/hostess-command-center/pull/4) was merged after
+[successful Linux CI](https://github.com/Su1teen/hostess-command-center/actions/runs/39039191941)
+into main `e9876423a6c60a96ee012e1b3ea0b6894b2cd40c`. Railway deployment
+`d0b7a59d-4d82-4043-8496-13fe83867b6e` succeeded; deploy logs confirm additive
+migrations 0008 and 0009 at 2026-10-17T14:08:25Z.
+
+The post-deploy read-only audit at 14:09:24Z confirmed 17 enabled credentials,
+unchanged credential/resource/generation fingerprint, unchanged 8/3/3/3 zones,
+zero verified mappings and unchanged business record counts. `/health` returned
+HTTP 200 with database `ok`; the QR management page returned HTTP 200. Evidence:
+[before](evidence/production-before.json), [after](evidence/production-after.json).
+The public Hostess BFF's pre-existing 503 remains the specific live guest-flow
+blocker. No VIP relationship, physical capacity or real coordinate was fabricated.

@@ -101,4 +101,14 @@ The pre-release production audit on 2026-10-17 confirmed 17 enabled QR credentia
 
 The existing public Hostess BFF returns `503 SERVICE_UNAVAILABLE` for the real table API while the canonical QR deep link returns HTML 200. This pre-existing external runtime configuration failure remains **BLOCKED** for live guest menu/checkout acceptance. The local real BFF contract passes; it does not substitute for the failed public runtime. Exact furniture positions and pending VIP relationships require the owner's physical verification. No live WhatsApp customer interaction was generated for testing.
 
-The merge, CI and Railway evidence is appended after the actual release; pre-release observations are not deployment acceptance.
+### Verified release, 2026-10-17 19:09 Asia/Almaty
+
+- Implementation PR: [#4](https://github.com/Su1teen/hostess-command-center/pull/4), merged with a merge commit after successful CI. Published history was not rewritten.
+- Implementation head: `7ebc1c87661ba0f71db876372e387e3dec131502`; verified merged main: `e9876423a6c60a96ee012e1b3ea0b6894b2cd40c`.
+- [Linux CI run 39039191941](https://github.com/Su1teen/hostess-command-center/actions/runs/39039191941): **SUCCESS**, including all PostgreSQL suites, Chromium and WebKit browser tests. Browser evidence is also uploaded as a CI artifact.
+- Railway deployment `d0b7a59d-4d82-4043-8496-13fe83867b6e`: **SUCCESS** for merged commit `e987642`; region `sfo`. Deployment logs at `2026-10-17T14:08:25Z` confirm both `0008_physical_table_registry.sql` and `0009_floor_operations.sql` applied. Startup then listened on port 8080.
+- Post-deploy `https://hostess-command-center-production.up.railway.app/health`: HTTP 200, `status=ok`, `db=ok`; `/` and `/tables/qr`: HTTP 200. The new floor API returns HTTP 401 `STAFF_REQUIRED` without an employee session, exposing no operational/guest data.
+- PostgreSQL read-only audit at `2026-10-17T14:09:24Z`: migration ledger 0001–0009; 17 enabled QR, 17 unique resources and credentials; unchanged zones 8/3/3/3; verified mappings still zero. The before/after credential fingerprint is identical. Reservations, dining sessions and orders remain zero; no production test business records were created. Cashback remains 300 bps/14 days, assumed-paid and the pre-existing enabled outbox remain unchanged.
+- Sanitized evidence: [before](evidence/production-before.json), [after](evidence/production-after.json). No individual QR credential or guest data is included.
+
+Production acceptance remains specifically **BLOCKED** for the public Hostess BFF, which still returns the same pre-existing `503 SERVICE_UNAVAILABLE`. Owner confirmation of capacities, VIP correspondence and real furniture coordinates is still required; these were deliberately not invented. Authenticated live staff/customer journeys were exercised in isolated PostgreSQL, not by creating production visits or orders.

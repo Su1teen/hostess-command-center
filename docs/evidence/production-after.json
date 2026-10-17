@@ -1,0 +1,67 @@
+{
+  "at": "2026-10-17T14:09:24.630Z",
+  "fingerprint": "5ed65d2d17acc5926721199abe3f2b95e11c42a5e63ffb11bd38c76a09191d77",
+  "qr": {
+    "points": 17,
+    "resources": 17,
+    "credentials": 17,
+    "enabled": 17
+  },
+  "zones": [
+    {
+      "code": "first_hall",
+      "name": "Первый зал",
+      "points": 8
+    },
+    {
+      "code": "ps",
+      "name": "ПС / общий зал",
+      "points": 3
+    },
+    {
+      "code": "second_hall",
+      "name": "Второй зал",
+      "points": 3
+    },
+    {
+      "code": "vip",
+      "name": "VIP-комнаты",
+      "points": 3
+    }
+  ],
+  "mappings": {
+    "total": 17,
+    "verified": 0
+  },
+  "migrations": [
+    "0001_reservations.sql",
+    "0002_reservation_tables.sql",
+    "0003_guest_booking.sql",
+    "0004_venue_inventory.sql",
+    "0005_fix_normalized_resource_links.sql",
+    "0006_dine_in.sql",
+    "0007_physical_inventory_mapping.sql",
+    "0008_physical_table_registry.sql",
+    "0009_floor_operations.sql"
+  ],
+  "counts": {
+    "reservations": 0,
+    "sessions": 0,
+    "orders": 0
+  },
+  "loyalty": [
+    {
+      "cashback_bps": 300,
+      "lifetime_days": 14
+    }
+  ],
+  "publicOrigin": "https://hostes.online",
+  "assumedPaid": "yes",
+  "outboxEnabled": "yes",
+  "publicSite": {
+    "tableApiStatus": 503,
+    "errorCode": "SERVICE_UNAVAILABLE",
+    "tableResourceMatches": false,
+    "deepLinkStatus": 200
+  }
+}
