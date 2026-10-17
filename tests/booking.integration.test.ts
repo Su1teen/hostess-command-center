@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import {
   hash,
   randomToken,
@@ -58,15 +58,9 @@ const interval = (day: number) => {
 };
 const bootstrap = () => api("/bootstrap", fixture());
 beforeAll(async () => {
-  for (const file of [
-    "0001_reservations.sql",
-    "0002_reservation_tables.sql",
-    "0003_guest_booking.sql",
-    "0004_venue_inventory.sql",
-    "0005_fix_normalized_resource_links.sql",
-    "0006_dine_in.sql",
-    "0007_physical_inventory_mapping.sql",
-  ])
+  for (const file of readdirSync(new URL("../src/server/db/migrations/", import.meta.url))
+    .filter((name) => name.endsWith(".sql"))
+    .sort())
     await pool.query(
       readFileSync(new URL(`../src/server/db/migrations/${file}`, import.meta.url), "utf8"),
     );

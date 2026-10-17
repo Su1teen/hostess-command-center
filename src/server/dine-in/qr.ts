@@ -3,7 +3,8 @@ import qrcodegen from "./vendor/qrcodegen";
 import { hostessPublicOrigin } from "../guest/security";
 
 export function tableUrl(code: string, token: string) {
-  const origin = hostessPublicOrigin(process.env.HOSTESS_PUBLIC_ORIGIN ?? "https://hostes.online");
+  // Printed panels use the permanent guest domain even when staff runs on Railway.
+  const origin = hostessPublicOrigin("https://hostes.online");
   return `${origin}/v/xoxo/t/${encodeURIComponent(code)}/${token}`;
 }
 function matrix(url: string) {
@@ -99,8 +100,10 @@ export function escapeHtml(value: string) {
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
   );
 }
-export function printPanels(tables: { code: string; url: string; enabled: boolean }[]) {
+export function printPanels(
+  tables: { code: string; url: string; enabled: boolean; zoneName?: string }[],
+) {
   return `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>XOXO — QR столов</title><style>
-    *{box-sizing:border-box}body{margin:0;font:16px Arial;color:#111;background:#eee}header{padding:20px}main{display:grid;grid-template-columns:repeat(2,1fr);gap:12mm;padding:12mm}.panel{background:white;border:1px solid #ddd;text-align:center;padding:9mm;break-inside:avoid;page-break-inside:avoid}.panel h1{font-size:40px;letter-spacing:5px;margin:0}.panel h2{font-size:30px;margin:10px}img{width:60mm;height:60mm}.small{font-size:11px;overflow-wrap:anywhere}@page{size:A4;margin:10mm}@media print{body{background:white}header{display:none}main{padding:0;gap:8mm}.panel{height:125mm}}</style>
-    <header><button onclick="window.print()">Печать / сохранить PDF</button><p>Печатайте в масштабе 100%. Проверьте сканирование перед размещением на столах.</p></header><main>${tables.map((t) => `<article class="panel"><h1>XOXO</h1><h2>Стол ${escapeHtml(t.code)}</h2><img alt="QR стола ${escapeHtml(t.code)}" src="data:image/svg+xml;base64,${Buffer.from(qrSvg(t.url)).toString("base64")}"><p>Сканируйте QR и закажите напитки</p><p>Кэшбэк 3% · бонусы на 14 дней</p><p>Оплата официанту через терминал</p>${t.enabled ? "" : "<strong>Заказы отключены</strong>"}<p class="small">${escapeHtml(t.url)}</p></article>`).join("")}</main></html>`;
+    *{box-sizing:border-box}body{margin:0;font:16px Arial;color:#111;background:#f4f4f2}header{padding:20px}button{min-height:44px;padding:8px 20px}main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8mm;padding:10mm;max-width:210mm;margin:auto}.panel{background:white;border:1px solid #ddd;text-align:center;padding:8mm;break-inside:avoid;page-break-inside:avoid}.panel h1{font-size:32px;letter-spacing:5px;margin:0}.panel h2{font-size:26px;margin:8px}.zone{margin:0 0 6px;color:#555}img{width:60mm;height:60mm;max-width:100%;object-fit:contain}.instruction{font-size:14px;line-height:1.5;max-width:60mm;margin:8px auto}@page{size:A4;margin:10mm}@media(max-width:500px){main{grid-template-columns:1fr;padding:16px}}@media print{body{background:white}header{display:none}main{grid-template-columns:repeat(2,minmax(0,1fr));padding:0;gap:8mm}.panel{height:125mm}}</style>
+    <header><button onclick="window.print()">Печать / сохранить PDF</button><p>${tables.length} QR · формат A4 · масштаб 100%. Проверьте сканирование перед размещением.</p></header><main>${tables.map((t) => `<article class="panel"><h1>XOXO</h1><h2>Стол ${escapeHtml(t.code)}</h2><p class="zone">${escapeHtml(t.zoneName ?? "")}</p><img alt="QR стола ${escapeHtml(t.code)}" src="data:image/svg+xml;base64,${Buffer.from(qrSvg(t.url)).toString("base64")}"><p class="instruction">Сканируйте, чтобы открыть меню и заказать.</p></article>`).join("")}</main></html>`;
 }

@@ -1,317 +1,347 @@
+import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { Maximize2, Minus, Plus } from "lucide-react";
+import type { FloorResource } from "../../lib/floor-operations";
+import type { MapPosition } from "../../lib/hall/operations";
 import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
-import { Maximize2, Minus, Plus, Tv } from "lucide-react";
-import { FLOOR_HEIGHT, FLOOR_WIDTH, HALL_TABLES, TV_SCREENS } from "../../lib/hall/layout";
-import type { TableOccupancy } from "../../lib/types/reservations";
-import { renderChairs } from "./renderChairs";
+  resourcePosition,
+  FLOOR_STATE_STYLE,
+  FLOOR_STATE_LABEL,
+} from "../../lib/hall/presentation";
 
-export const OCCUPANCY_COLOR: Record<TableOccupancy, string> = {
-  free: "#9FB9A2",
-  booked: "#C88484",
-  seated: "#C9A96E",
-};
-
-const MIN_SCALE = 0.6;
-const MAX_SCALE = 2.5;
-const TAP_SLOP = 8;
-const VIEW_HEIGHT = 420;
-
-interface View {
-  scale: number;
-  tx: number;
-  ty: number;
-}
-
+const WIDTH = 1000,
+  HEIGHT = 700;
 type Point = { x: number; y: number };
-
-function clampView(view: View, width: number, height: number): View {
-  const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, view.scale));
-  const contentW = FLOOR_WIDTH * scale;
-  const contentH = FLOOR_HEIGHT * scale;
-  // Keep at least ~35% of the floor inside the viewport on each axis.
-  const slackX = Math.max(width, contentW) * 0.35;
-  const slackY = Math.max(height, contentH) * 0.35;
-  const tx = Math.min(width - slackX, Math.max(slackX - contentW, view.tx));
-  const ty = Math.min(height - slackY, Math.max(slackY - contentH, view.ty));
-  return { scale, tx, ty };
-}
-
-function fitView(width: number, height: number): View {
-  const scale = Math.min(width / FLOOR_WIDTH, height / FLOOR_HEIGHT);
-  return {
-    scale,
-    tx: (width - FLOOR_WIDTH * scale) / 2,
-    ty: (height - FLOOR_HEIGHT * scale) / 2,
-  };
-}
-
 export function FloorPlan({
-  occupancy,
+  resources,
   selectedId,
   onSelect,
-  stale,
+  editing = false,
+  positions,
+  onPosition,
 }: {
-  occupancy: Map<string, TableOccupancy>;
-  selectedId?: string | null;
+  resources: FloorResource[];
+  selectedId: string | null;
   onSelect: (id: string) => void;
-  stale?: boolean;
+  editing?: boolean;
+  positions?: Record<string, MapPosition>;
+  onPosition?: (id: string, position: MapPosition) => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ width: 0, height: VIEW_HEIGHT });
-  const [view, setView] = useState<View>({ scale: 0.8, tx: 0, ty: 0 });
-  const viewRef = useRef(view);
-  viewRef.current = view;
-
+  const host = useRef<HTMLDivElement>(null),
+    svg = useRef<SVGSVGElement>(null);
+  const [zoom, setZoom] = useState(1),
+    [pan, setPan] = useState({ x: 0, y: 0 });
+  const [viewport, setViewport] = useState({ width: WIDTH, scale: 1 });
   const pointers = useRef(new Map<number, Point>());
-  const gesture = useRef<{ start: Point; view: View; dist: number; mid: Point } | null>(null);
-  const moved = useRef(false);
-
-  const fit = useCallback(() => {
-    if (!size.width) return;
-    setView(fitView(size.width, size.height));
-  }, [size]);
-
+  const pinch = useRef<{ distance: number; zoom: number; midpoint: Point; pan: Point } | null>(
+    null,
+  );
+  const dragging = useRef<{ id: string; start: Point; layout: MapPosition } | null>(null);
+  const gestureMoved = useRef(false);
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(([entry]) => {
-      const width = entry.contentRect.width;
-      setSize((prev) => (prev.width === width ? prev : { width, height: VIEW_HEIGHT }));
+    const element = svg.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => {
+      const rect = element.getBoundingClientRect();
+      setViewport({
+        width: rect.width,
+        scale: Math.max(0.01, Math.min(rect.width / WIDTH, rect.height / HEIGHT)),
+      });
     });
-    observer.observe(el);
+    observer.observe(element);
     return () => observer.disconnect();
   }, []);
-
-  const fitted = useRef(false);
-  const previousWidth = useRef(0);
+  const zoneId = resources[0]?.zoneId;
   useEffect(() => {
-    if (size.width && !fitted.current) {
-      fitted.current = true;
-      fit();
-    }
-  }, [size, fit]);
-
-  useEffect(() => {
-    if (!size.width) return;
-    if (previousWidth.current && previousWidth.current !== size.width) fit();
-    previousWidth.current = size.width;
-  }, [size.width, fit]);
-
-  const apply = (next: View) => setView(clampView(next, size.width, size.height));
-
-  const zoomAround = (factor: number, center: Point, base = viewRef.current) => {
-    const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, base.scale * factor));
-    const ratio = scale / base.scale;
-    apply({
-      scale,
-      tx: center.x - (center.x - base.tx) * ratio,
-      ty: center.y - (center.y - base.ty) * ratio,
-    });
-  };
-
-  const localPoint = (event: ReactPointerEvent): Point => {
-    const rect = containerRef.current!.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  };
-
-  const snapshot = () => {
-    const pts = [...pointers.current.values()];
-    if (pts.length >= 2) {
-      const [a, b] = pts;
-      return {
-        mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
-        dist: Math.hypot(a.x - b.x, a.y - b.y),
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [zoneId]);
+  const changeZoom = (value: number) => setZoom(Math.min(3, Math.max(0.8, value)));
+  const point = (e: PointerEvent): Point => ({ x: e.clientX, y: e.clientY });
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    pointers.current.set(e.pointerId, point(e));
+    gestureMoved.current = false;
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      pinch.current = {
+        distance: Math.hypot(a.x - b.x, a.y - b.y),
+        zoom,
+        midpoint: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+        pan,
       };
+      for (const id of pointers.current.keys()) e.currentTarget.setPointerCapture(id);
+      dragging.current = null;
     }
-    return { mid: pts[0] ?? { x: 0, y: 0 }, dist: 0 };
   };
-
-  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const point = localPoint(event);
-    pointers.current.set(event.pointerId, point);
-
-    if (pointers.current.size === 1) {
-      moved.current = false;
-      gesture.current = { start: point, view: viewRef.current, dist: 0, mid: point };
-      // A single touch is reserved for page scrolling and table taps. Mouse users can still pan.
-      if (event.pointerType === "mouse") containerRef.current?.setPointerCapture(event.pointerId);
-      return;
-    }
-
-    // A second touch explicitly opts into map navigation. This prevents the map from
-    // stealing the page's vertical scroll during normal one-thumb use.
-    for (const pointerId of pointers.current.keys()) {
-      containerRef.current?.setPointerCapture(pointerId);
-    }
-    moved.current = true;
-    const { mid, dist } = snapshot();
-    gesture.current = { start: mid, view: viewRef.current, dist, mid };
-  };
-
-  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!pointers.current.has(event.pointerId) || !gesture.current) return;
-    pointers.current.set(event.pointerId, localPoint(event));
-    const g = gesture.current;
-    const { mid, dist } = snapshot();
-    if (Math.hypot(mid.x - g.start.x, mid.y - g.start.y) > TAP_SLOP) moved.current = true;
-
-    if (pointers.current.size >= 2 && g.dist > 0) {
-      const factor = dist / g.dist;
-      const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, g.view.scale * factor));
-      const ratio = scale / g.view.scale;
-      apply({
-        scale,
-        tx: mid.x - (g.mid.x - g.view.tx) * ratio,
-        ty: mid.y - (g.mid.y - g.view.ty) * ratio,
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (!pointers.current.has(e.pointerId)) return;
+    pointers.current.set(e.pointerId, point(e));
+    if (pointers.current.size >= 2 && pinch.current) {
+      const [a, b] = [...pointers.current.values()],
+        original = pinch.current;
+      changeZoom(
+        (original.zoom * Math.hypot(a.x - b.x, a.y - b.y)) / Math.max(1, original.distance),
+      );
+      const rect = host.current?.getBoundingClientRect();
+      setPan({
+        x: Math.max(
+          -WIDTH,
+          Math.min(
+            WIDTH,
+            original.pan.x +
+              (((a.x + b.x) / 2 - original.midpoint.x) * WIDTH) / (rect?.width ?? WIDTH),
+          ),
+        ),
+        y: Math.max(
+          -HEIGHT,
+          Math.min(
+            HEIGHT,
+            original.pan.y +
+              (((a.y + b.y) / 2 - original.midpoint.y) * HEIGHT) / (rect?.height ?? HEIGHT),
+          ),
+        ),
       });
-    } else if (event.pointerType === "mouse") {
-      apply({
-        scale: g.view.scale,
-        tx: g.view.tx + (mid.x - g.start.x),
-        ty: g.view.ty + (mid.y - g.start.y),
+      gestureMoved.current = true;
+    } else if (editing && dragging.current && svg.current) {
+      const drag = dragging.current,
+        matrix = svg.current.getScreenCTM();
+      if (!matrix) return;
+      const dx = (e.clientX - drag.start.x) / matrix.a / zoom;
+      const dy = (e.clientY - drag.start.y) / matrix.d / zoom;
+      if (Math.hypot(dx, dy) > 4) gestureMoved.current = true;
+      onPosition?.(drag.id, {
+        ...drag.layout,
+        x: Math.round(Math.max(0, Math.min(WIDTH - drag.layout.width, drag.layout.x + dx))),
+        y: Math.round(Math.max(0, Math.min(HEIGHT - drag.layout.height, drag.layout.y + dy))),
       });
     }
   };
-
-  const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const wasSingle = pointers.current.size === 1;
-    pointers.current.delete(event.pointerId);
-    if (pointers.current.size === 0) {
-      gesture.current = null;
-      if (wasSingle && !moved.current && event.type === "pointerup") {
-        // Pointer capture redirects the event to the container, so hit-test manually.
-        const hit = document
-          .elementFromPoint(event.clientX, event.clientY)
-          ?.closest<SVGGElement>("[data-table-id]");
-        const id = hit?.dataset.tableId;
-        if (id) onSelect(id);
-      }
-    } else {
-      const { mid, dist } = snapshot();
-      gesture.current = { start: mid, view: viewRef.current, dist, mid };
-    }
+  const finish = (e: PointerEvent<HTMLDivElement>) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+    if (!pointers.current.size) dragging.current = null;
   };
-
-  const zoomAroundRef = useRef(zoomAround);
-  zoomAroundRef.current = zoomAround;
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const rect = el.getBoundingClientRect();
-      zoomAroundRef.current(event.deltaY < 0 ? 1.1 : 0.9, {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      });
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
-
-  const center = { x: size.width / 2, y: size.height / 2 };
-
+  const missing = resources.some(
+    (resource) => resource.layout.x === null || resource.layout.y === null,
+  );
   return (
-    <div className="relative overflow-hidden rounded-3xl bg-white shadow-sm">
-      <div className="absolute right-3 top-3 z-10 flex gap-1 rounded-full bg-white/90 p-1 shadow-sm backdrop-blur">
-        <button
-          type="button"
-          aria-label="Уменьшить"
-          onClick={() => zoomAround(0.8, center)}
-          className="rounded-full p-2.5 active:bg-slate-100"
-        >
-          <Minus size={16} />
-        </button>
-        <button
-          type="button"
-          aria-label="Увеличить"
-          onClick={() => zoomAround(1.25, center)}
-          className="rounded-full p-2.5 active:bg-slate-100"
-        >
-          <Plus size={16} />
-        </button>
-        <button
-          type="button"
-          aria-label="Показать весь зал"
-          onClick={fit}
-          className="rounded-full p-2.5 active:bg-slate-100"
-        >
-          <Maximize2 size={16} />
-        </button>
+    <section
+      className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+      aria-label="Интерактивная карта зоны"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+        <p className="text-xs text-slate-500">
+          {editing
+            ? "Перетащите стол или используйте стрелки клавиатуры"
+            : "Выберите стол · масштаб двумя пальцами"}
+        </p>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            aria-label="Уменьшить карту"
+            className="min-h-11 rounded-lg p-3 hover:bg-slate-100"
+            onClick={() => changeZoom(zoom / 1.2)}
+          >
+            <Minus size={16} />
+          </button>
+          <button
+            type="button"
+            aria-label="Увеличить карту"
+            className="min-h-11 rounded-lg p-3 hover:bg-slate-100"
+            onClick={() => changeZoom(zoom * 1.2)}
+          >
+            <Plus size={16} />
+          </button>
+          <button
+            type="button"
+            aria-label="Показать всю карту"
+            className="min-h-11 rounded-lg p-3 hover:bg-slate-100"
+            onClick={() => {
+              setZoom(1);
+              setPan({ x: 0, y: 0 });
+            }}
+          >
+            <Maximize2 size={16} />
+          </button>
+        </div>
       </div>
+      {missing && (
+        <p className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+          Расположение не настроено. Столы без координат показаны в схематической сетке; она не
+          описывает помещение.
+        </p>
+      )}
       <div
-        ref={containerRef}
+        ref={host}
+        className="relative overflow-hidden bg-slate-50/50"
+        style={{
+          touchAction: editing ? "none" : "pan-y",
+          aspectRatio: "10 / 7",
+          minHeight: 280,
+          maxHeight: 600,
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onTouchMove={(event) => {
-          if (event.touches.length > 1) event.preventDefault();
-        }}
-        className={`relative w-full select-none overflow-hidden transition-opacity ${stale ? "opacity-70" : ""}`}
-        style={{
-          height: VIEW_HEIGHT,
-          touchAction: "pan-y",
-          overscrollBehaviorX: "contain",
-        }}
+        onPointerUp={finish}
+        onPointerCancel={finish}
       >
         <svg
-          width={FLOOR_WIDTH}
-          height={FLOOR_HEIGHT}
-          viewBox={`0 0 ${FLOOR_WIDTH} ${FLOOR_HEIGHT}`}
-          className="absolute left-0 top-0 will-change-transform"
-          style={{
-            transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`,
-            transformOrigin: "0 0",
-          }}
+          ref={svg}
+          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+          className="h-full min-h-[280px] w-full"
+          aria-label="Столы выбранной зоны"
         >
-          <rect x="12" y="12" width="476" height="526" rx="22" fill="#f8fafc" stroke="#e2e8f0" />
-          {TV_SCREENS.map((tv) => (
-            <g key={tv.id}>
-              <polygon points={tv.cone} fill="#c9a96e" opacity=".08" />
-              <Tv x={tv.x - 14} y={tv.y - 14} size={16} color="#94a3b8" />
-            </g>
-          ))}
-          {HALL_TABLES.map((table) => {
-            const status = occupancy.get(table.id) ?? "free";
-            const selected = selectedId === table.id;
-            const cx = table.x + table.w / 2;
-            const cy = table.y + table.h / 2;
-            return (
-              <g key={table.id} data-table-id={table.id} className="cursor-pointer">
-                {table.shape === "round" &&
-                  renderChairs(table.seats, cx, cy, Math.max(table.w, table.h) / 2 + 11)}
-                <rect
-                  x={table.x}
-                  y={table.y}
-                  width={table.w}
-                  height={table.h}
-                  rx={table.shape === "round" ? table.w / 2 : 10}
-                  fill={OCCUPANCY_COLOR[status]}
-                  opacity={selected ? 1 : 0.85}
-                  stroke={selected ? "#0f172a" : "none"}
-                  strokeWidth={selected ? 3 : 0}
-                />
-                <text
-                  x={cx}
-                  y={cy + 4}
-                  textAnchor="middle"
-                  fontSize="12"
-                  fontWeight="700"
-                  fill="#334155"
+          <defs>
+            <pattern id="floor-dots" width="25" height="25" patternUnits="userSpaceOnUse">
+              <circle cx="1" cy="1" r="1" fill="#dce3eb" />
+            </pattern>
+          </defs>
+          <rect width={WIDTH} height={HEIGHT} fill="url(#floor-dots)" />
+          <g
+            transform={`translate(${WIDTH / 2 + pan.x},${HEIGHT / 2 + pan.y}) scale(${zoom}) translate(${-WIDTH / 2},${-HEIGHT / 2})`}
+          >
+            {resources.map((resource, index) => {
+              const p = positions?.[resource.id] ?? resourcePosition(resource, index),
+                style = FLOOR_STATE_STYLE[resource.state];
+              const pixelsPerUnit = viewport.scale * zoom;
+              const hitWidth = Math.max(p.width, 45 / pixelsPerUnit);
+              const hitHeight = Math.max(p.height, 45 / pixelsPerUnit);
+              const compact = viewport.width < 640;
+              return (
+                <g
+                  key={resource.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${resource.name}: ${FLOOR_STATE_LABEL[resource.state]}`}
+                  aria-pressed={selectedId === resource.id}
+                  className="cursor-pointer outline-none focus:drop-shadow-lg"
+                  transform={`translate(${p.x},${p.y}) rotate(${p.rotation},${p.width / 2},${p.height / 2})`}
+                  onClick={() => {
+                    if (!gestureMoved.current) onSelect(resource.id);
+                  }}
+                  onPointerDown={(e) => {
+                    e.currentTarget.focus();
+                    if (editing && pointers.current.size < 2) {
+                      onSelect(resource.id);
+                      dragging.current = { id: resource.id, start: point(e), layout: p };
+                      host.current?.setPointerCapture(e.pointerId);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onSelect(resource.id);
+                    }
+                    if (
+                      editing &&
+                      ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)
+                    ) {
+                      e.preventDefault();
+                      const step = e.shiftKey ? 20 : 5;
+                      onPosition?.(resource.id, {
+                        ...p,
+                        x: Math.max(
+                          0,
+                          Math.min(
+                            WIDTH - p.width,
+                            p.x +
+                              (e.key === "ArrowRight" ? step : e.key === "ArrowLeft" ? -step : 0),
+                          ),
+                        ),
+                        y: Math.max(
+                          0,
+                          Math.min(
+                            HEIGHT - p.height,
+                            p.y + (e.key === "ArrowDown" ? step : e.key === "ArrowUp" ? -step : 0),
+                          ),
+                        ),
+                      });
+                    }
+                  }}
                 >
-                  {table.label}
-                </text>
-              </g>
-            );
-          })}
+                  <title>
+                    {resource.name} · {FLOOR_STATE_LABEL[resource.state]}
+                    {resource.capacity ? ` · ${resource.capacity} мест` : ""}
+                  </title>
+                  <rect
+                    data-floor-hit-target=""
+                    x={(p.width - hitWidth) / 2}
+                    y={(p.height - hitHeight) / 2}
+                    width={hitWidth}
+                    height={hitHeight}
+                    fill="transparent"
+                    pointerEvents="all"
+                  />
+                  <rect
+                    x={-4}
+                    y={-4}
+                    width={p.width + 8}
+                    height={p.height + 8}
+                    rx={p.shape === "round" ? p.width / 2 : 18}
+                    fill="none"
+                    stroke={selectedId === resource.id ? "#0f172a" : "transparent"}
+                    strokeWidth={3}
+                  />
+                  <rect
+                    width={p.width}
+                    height={p.height}
+                    rx={p.shape === "round" ? Math.min(p.width, p.height) / 2 : 14}
+                    fill={style.fill}
+                    stroke={style.stroke}
+                    strokeWidth={2}
+                  />
+                  {compact ? (
+                    <text
+                      x={p.width / 2}
+                      y={p.height / 2 + 5 / pixelsPerUnit}
+                      textAnchor="middle"
+                      fontSize={14 / pixelsPerUnit}
+                      fontWeight={600}
+                      aria-hidden="true"
+                    >
+                      <tspan fill="#172033">{resource.code}</tspan>
+                      <tspan fill={style.text}> {style.mark}</tspan>
+                    </text>
+                  ) : (
+                    <>
+                      <text
+                        x={p.width / 2}
+                        y={p.height / 2 - 3}
+                        textAnchor="middle"
+                        fill="#172033"
+                        fontSize={17}
+                        fontWeight={600}
+                      >
+                        {resource.name.length > 19
+                          ? `${resource.name.slice(0, 18)}…`
+                          : resource.name}
+                      </text>
+                      <text
+                        x={p.width / 2}
+                        y={p.height / 2 + 20}
+                        textAnchor="middle"
+                        fill={style.text}
+                        fontSize={11}
+                      >
+                        {style.mark}{" "}
+                        {resource.state === "qr_activity"
+                          ? "QR · без посадки"
+                          : resource.state === "unconfigured"
+                            ? "Нужна настройка"
+                            : FLOOR_STATE_LABEL[resource.state]}
+                      </text>
+                    </>
+                  )}
+                </g>
+              );
+            })}
+          </g>
         </svg>
       </div>
-    </div>
+      {!resources.length && (
+        <p className="p-6 text-center text-sm text-slate-500">
+          В этой зоне нет назначенных QR-точек. Распределение настраивается в управлении столами.
+        </p>
+      )}
+    </section>
   );
 }

@@ -30,6 +30,10 @@ export function OrdersScreen() {
     [guestSearch, setGuestSearch] = useState("");
   const audio = useRef<AudioContext | null>(null),
     seen = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const orderId = new URLSearchParams(window.location.search).get("order");
+    if (orderId && /^[a-f0-9-]{36}$/i.test(orderId)) setSelected(orderId);
+  }, []);
   const list = useQuery({
     queryKey: ["dining-orders", status, search],
     queryFn: ({ signal }) =>

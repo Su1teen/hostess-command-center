@@ -14,8 +14,8 @@
     "db:migrate": "node scripts/migrate.mjs",
     "start": "node scripts/start.mjs",
     "booking:preflight": "node scripts/booking-preflight.mjs",
-    "test": "bun test tests/dine-in.unit.test.ts && node scripts/test-integration.mjs",
-    "test:unit": "bun test tests/dine-in.unit.test.ts",
+    "test": "bun run test:unit && node scripts/test-integration.mjs",
+    "test:unit": "bun test tests/dine-in.unit.test.ts tests/floor-operations.unit.test.ts",
     "test:integration": "node scripts/test-integration.mjs"
   },
   "dependencies": {

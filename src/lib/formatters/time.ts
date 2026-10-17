@@ -1,26 +1,30 @@
-import { VENUE_TIMEZONE } from "../constants";
-
 /** Asia/Almaty has no DST and is fixed at UTC+5. */
 export const VENUE_UTC_OFFSET = "+05:00";
 
+// Some embedded runtimes ship tzdata from before Kazakhstan's 2024 offset change.
+// Render the venue's established +05:00 wall clock consistently with almatyToIso.
+function venueWallClock(value: string | Date): Date {
+  return new Date(new Date(value).getTime() + 5 * 60 * 60_000);
+}
+
 export function formatTimeAlmaty(value: string | Date): string {
   return new Intl.DateTimeFormat("ru-RU", {
-    timeZone: VENUE_TIMEZONE,
+    timeZone: "UTC",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
+    hourCycle: "h23",
+  }).format(venueWallClock(value));
 }
 
 export function formatDateTimeAlmaty(value: string | Date): string {
   return new Intl.DateTimeFormat("ru-RU", {
-    timeZone: VENUE_TIMEZONE,
+    timeZone: "UTC",
     day: "numeric",
     month: "long",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
+    hourCycle: "h23",
+  }).format(venueWallClock(value));
 }
 
 export function formatTimeRangeAlmaty(start: string | Date, end: string | Date | null): string {
@@ -30,11 +34,11 @@ export function formatTimeRangeAlmaty(start: string | Date, end: string | Date |
 /** Calendar date (YYYY-MM-DD) of an instant in the venue timezone. */
 export function almatyDateKey(value: string | Date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: VENUE_TIMEZONE,
+    timeZone: "UTC",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(new Date(value));
+  }).formatToParts(venueWallClock(value));
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
@@ -68,18 +72,18 @@ export function formatDateKeyHuman(date: string, today = almatyDateKey()): strin
   const instant = new Date(`${date}T12:00:00${VENUE_UTC_OFFSET}`);
   const weekday = WEEKDAY_SHORT[instant.getUTCDay()];
   const dayMonth = new Intl.DateTimeFormat("ru-RU", {
-    timeZone: VENUE_TIMEZONE,
+    timeZone: "UTC",
     day: "numeric",
     month: "short",
-  }).format(instant);
+  }).format(venueWallClock(instant));
   return `${weekday}, ${dayMonth}`;
 }
 
 /** "20 сент." */
 export function formatDateKeyShort(date: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
-    timeZone: VENUE_TIMEZONE,
+    timeZone: "UTC",
     day: "numeric",
     month: "short",
-  }).format(new Date(`${date}T12:00:00${VENUE_UTC_OFFSET}`));
+  }).format(venueWallClock(new Date(`${date}T12:00:00${VENUE_UTC_OFFSET}`)));
 }

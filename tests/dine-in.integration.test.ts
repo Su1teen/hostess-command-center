@@ -9,7 +9,7 @@ const consumer = process.env.HOSTESS_CONSUMER_ROOT
     )
   : consumerFixture;
 const { tableSchema, quoteSchema, orderSchema, walletSchema, transactionSchema } = consumer;
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { pool } from "../src/server/db/pool";
 import { transaction, newSession } from "../src/server/guest/auth";
@@ -170,6 +170,12 @@ beforeAll(async () => {
       "utf8",
     ),
   );
+  for (const file of readdirSync(new URL("../src/server/db/migrations/", import.meta.url))
+    .filter((name) => name.endsWith(".sql") && name > "0007_physical_inventory_mapping.sql")
+    .sort())
+    await pool.query(
+      readFileSync(new URL("../src/server/db/migrations/" + file, import.meta.url), "utf8"),
+    );
   venueId = (await pool.query("SELECT id FROM hostess_venues WHERE slug='xoxo'")).rows[0].id;
   for (const role of ["viewer", "operator", "manager"])
     staff[role] = (await transaction((c) => newSession(c, null, role, role))).split(";")[0];
@@ -795,7 +801,7 @@ test("staff CRM writes preserve authorization with QR feature disabled", async (
   }
 });
 
-test("dining session closes only after every order finishes and next visit is separate", async () => {
+test("terminal orders retain visit and idle unconfirmed session expires before a new visit", async () => {
   const a = await submit(anon()),
     b = await submit(anon());
   const sessionId = async (id: string) =>
@@ -821,9 +827,17 @@ test("dining session closes only after every order finishes and next visit is se
   expect(
     (await pool.query("SELECT closed_at FROM dining_sessions WHERE id=$1", [first])).rows[0]
       .closed_at,
-  ).not.toBeNull();
+  ).toBeNull();
+  await pool.query(
+    "UPDATE dining_sessions SET last_activity_at=now()-interval '31 minutes' WHERE id=$1",
+    [first],
+  );
   const next = await submit(anon());
   expect(await sessionId(next.order.id)).not.toBe(first);
+  expect(
+    (await pool.query("SELECT visit_status FROM dining_sessions WHERE id=$1", [first])).rows[0]
+      .visit_status,
+  ).toBe("expired");
 });
 
 test("cancel and manual payment in one service operation cannot mark a cancelled order paid", async () => {
@@ -842,6 +856,13 @@ test("cancel and manual payment in one service operation cannot mark a cancelled
 
 test("verified physical alias protects legacy, WhatsApp and normalized competing bookings while QR ordering remains independent", async () => {
   const resource = table.resource_id;
+  // Prior checkout fixtures may leave an open visit. End those fixture visits
+  // before testing a new physical relationship; production reconfiguration
+  // correctly refuses to detach an active visit from its physical aliases.
+  await pool.query(
+    "UPDATE dining_sessions SET closed_at=now(),visit_status='released' WHERE resource_id=$1 AND closed_at IS NULL",
+    [resource],
+  );
   await expect(
     pool.query("UPDATE venue_resources SET is_reservable=true,capacity=6 WHERE id=$1", [resource]),
   ).rejects.toMatchObject({ code: "23514" });

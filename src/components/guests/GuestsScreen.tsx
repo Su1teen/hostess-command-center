@@ -41,6 +41,23 @@ export function GuestsScreen() {
       });
     return () => controller.abort();
   }, []);
+  useEffect(() => {
+    const guestId = new URLSearchParams(window.location.search).get("guest");
+    const guest = guests.find((item) => item.id === guestId);
+    if (!guest) return;
+    setSelected(guest);
+    const controller = new AbortController();
+    void fetch(`/api/staff/v1/guests/${guest.id}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error?.message ?? "История недоступна");
+        setBookings(body.reservations);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setError(error.message);
+      });
+    return () => controller.abort();
+  }, [guests]);
   async function open(guest: Guest) {
     setSelected(guest);
     setBookings([]);
