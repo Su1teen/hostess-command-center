@@ -1,5 +1,6 @@
 import { getById } from "../repositories/reservations.repository";
 import { handleDiningApi, guestDiningSummary } from "../dine-in/api";
+import { handleFloorApi } from "../floor/api";
 import { mergeDiningGuest, mergeVerifiedStaffGuests } from "../dine-in/loyalty";
 import { z } from "zod";
 import { HALL_TABLES, TV_SCREENS, FLOOR_WIDTH, FLOOR_HEIGHT } from "../../lib/hall/layout";
@@ -114,7 +115,10 @@ async function availability(
     FROM command_center_reservations WHERE status NOT IN ('cancelled','no_show')
       AND starts_at<$2 AND COALESCE(ends_at,starts_at+interval '2 hours')>$1
     UNION SELECT unnest(table_ids) FROM hostess_holds WHERE consumed_at IS NULL AND expires_at>now()
-      AND guest_id IS DISTINCT FROM $3::uuid AND starts_at<$2 AND ends_at>$1`,
+      AND guest_id IS DISTINCT FROM $3::uuid AND starts_at<$2 AND ends_at>$1
+    UNION SELECT r.code FROM dining_sessions s JOIN venue_resources r ON r.id=s.resource_id
+      WHERE r.venue_code='xoxo' AND s.seated_at IS NOT NULL AND s.closed_at IS NULL AND s.seated_at<$2
+        AND CASE WHEN s.expected_end_at>clock_timestamp() THEN s.expected_end_at ELSE 'infinity'::timestamptz END>$1`,
     [startsAt, endsAt, guestId],
   );
   const occupied = new Set(
@@ -190,6 +194,8 @@ async function reservationList(
 }
 
 export async function handleBookingApi(request: Request): Promise<Response | null> {
+  const floor = await handleFloorApi(request);
+  if (floor) return floor;
   const dining = await handleDiningApi(request);
   if (dining) return dining;
   const url = new URL(request.url);

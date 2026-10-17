@@ -19,12 +19,12 @@ function run(cmd, args, env) {
   if (p.status !== 0) throw new Error(`${cmd} exited ${p.status}`);
 }
 try {
-  for (const suite of ["booking", "dine-in", "migrations"]) {
+  for (const suite of ["booking", "dine-in", "physical-tables", "floor-operations", "migrations"]) {
     // Windows Bun 1.3.13 stalls pg callbacks on concurrent checkout; exercise the
     // same fixtures under the production Node runtime in their own local schema.
-    if (suite === "dine-in" && process.platform === "win32") {
+    if (suite !== "booking" && suite !== "migrations" && process.platform === "win32") {
       try {
-        run(process.execPath, ["scripts/test-node-dining.mjs"], { TEST_DATABASE_URL: raw });
+        run(process.execPath, ["scripts/test-node-dining.mjs", suite], { TEST_DATABASE_URL: raw });
       } catch (error) {
         failed = true;
         console.error(error.message);
@@ -39,6 +39,8 @@ try {
       DATABASE_URL: scoped.href,
       TEST_BOOKING_DATABASE_URL: scoped.href,
       TEST_DINING_DATABASE_URL: scoped.href,
+      TEST_FLOOR_DATABASE_URL: scoped.href,
+      TEST_PHYSICAL_DATABASE_URL: scoped.href,
       NODE_ENV: "test",
       ALLOW_GUEST_BOOKING_MIGRATION: "yes",
       HOSTESS_BFF_KEY: "b".repeat(43),
@@ -47,7 +49,7 @@ try {
       EXCHANGE_API_ORIGIN: "http://127.0.0.1:19092",
       COMMAND_CENTER_ORIGIN: "https://command.test",
       HOSTESS_PUBLIC_ORIGIN: "https://hostes.online",
-      DINE_IN_ENABLED: suite === "dine-in" ? "yes" : "no",
+      DINE_IN_ENABLED: suite === "booking" ? "no" : "yes",
       DINE_IN_PILOT_ASSUMED_PAID: "yes",
       DINE_IN_OUTBOX_ENABLED: "no",
     };
@@ -63,12 +65,7 @@ try {
       } else
         run(
           process.env.BUN_BINARY || "bun",
-          [
-            "test",
-            `tests/${suite === "booking" ? "booking.integration" : "dine-in.integration"}.test.ts`,
-            "--timeout",
-            "20000",
-          ],
+          ["test", `tests/${suite}.integration.test.ts`, "--timeout", "20000"],
           env,
         );
     } catch (error) {

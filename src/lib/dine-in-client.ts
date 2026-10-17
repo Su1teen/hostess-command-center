@@ -6,6 +6,8 @@ export async function staffApi<T>(path: string, init?: RequestInit): Promise<T> 
     headers: { ...(init?.body ? { "content-type": "application/json" } : {}), ...init?.headers },
   });
   const data = await response.json();
+  if (response.status === 401 && typeof window !== "undefined")
+    window.dispatchEvent(new CustomEvent("hostess:session-expired"));
   if (!response.ok) throw new Error(data.error?.message ?? "Сервис недоступен");
   return data;
 }
@@ -81,6 +83,33 @@ export type QrTable = {
   legacyCode: string | null;
   mappingVerified: boolean;
   bookable: boolean;
+  zoneCode: string;
+  resourceType: "table" | "private_room" | "bar_seating";
+  capacity: number | null;
+  version: number;
+  relationship: "pending" | "independent" | "linked";
+  linkedResourceId: string | null;
+  linkedResourceName: string | null;
+  linkedResourceCode: string | null;
+  verificationNote: string;
+  verifiedAt: string | null;
+  bookingState: "pending" | "available" | "unavailable";
+};
+export type BookingTarget = {
+  id: string;
+  code: string;
+  name: string;
+  zoneName: string;
+  resourceType: QrTable["resourceType"];
+  capacity: number | null;
+  linkedFromResourceId: string | null;
+  bookable: boolean;
+};
+export type QrRegistry = {
+  tables: QrTable[];
+  zones: { id: string; name: string; code: string }[];
+  bookingTargets: BookingTarget[];
+  distribution?: { matchesExpected: boolean; expectedLabel: string };
 };
 export const controlClass =
   "min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm disabled:opacity-40";

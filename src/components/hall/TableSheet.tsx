@@ -11,7 +11,7 @@ import {
 import { BottomSheet } from "../shared/BottomSheet";
 import { PhoneActions } from "../shared/PhoneActions";
 import { StatusPill } from "../shared/StatusPill";
-import { OCCUPANCY_COLOR } from "./FloorPlan";
+import { OCCUPANCY_COLOR } from "../../lib/hall/presentation";
 
 export function TableSheet({
   tableId,

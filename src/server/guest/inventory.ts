@@ -88,7 +88,10 @@ export async function listVenueAvailability(
        UNION
        SELECT unnest(h.table_ids) AS code FROM hostess_holds h
        WHERE h.consumed_at IS NULL AND h.expires_at>now()
-         AND h.guest_id IS DISTINCT FROM $3::uuid AND h.starts_at<$2 AND h.ends_at>$1`,
+         AND h.guest_id IS DISTINCT FROM $3::uuid AND h.starts_at<$2 AND h.ends_at>$1
+       UNION SELECT r.code FROM dining_sessions s JOIN venue_resources r ON r.id=s.resource_id
+       WHERE r.venue_code='xoxo' AND s.seated_at IS NOT NULL AND s.closed_at IS NULL
+         AND s.seated_at<$2 AND CASE WHEN s.expected_end_at>clock_timestamp() THEN s.expected_end_at ELSE 'infinity'::timestamptz END>$1`,
       [startsAt, endsAt, guestId],
     ),
   ]);
@@ -201,6 +204,12 @@ export async function selectReservableResource(
        AND NOT EXISTS (
          SELECT 1 FROM hostess_holds h WHERE h.consumed_at IS NULL AND h.expires_at>now()
            AND hostess_inventory_conflicts(ARRAY[r.code],h.table_ids) AND h.starts_at<$5 AND h.ends_at>$4
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM dining_sessions s JOIN venue_resources seated ON seated.id=s.resource_id
+         WHERE s.venue_id=r.venue_id AND s.seated_at IS NOT NULL AND s.closed_at IS NULL
+           AND hostess_inventory_conflicts(ARRAY[r.code],ARRAY[seated.code]) AND s.seated_at<$5
+           AND CASE WHEN s.expected_end_at>clock_timestamp() THEN s.expected_end_at ELSE 'infinity'::timestamptz END>$4
        )
      ORDER BY r.capacity ASC,z.display_order,r.code
      LIMIT 1 FOR UPDATE OF r`,

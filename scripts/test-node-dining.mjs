@@ -11,8 +11,11 @@ if (!raw || !["127.0.0.1", "localhost"].includes(url.hostname) || url.username !
   throw new Error("Only isolated local hostess_test PostgreSQL is permitted");
 const schema = "hostess_test_" + randomUUID().replaceAll("-", "");
 const pool = new pg.Pool({ connectionString: raw });
-const source = new URL("../tests/.audit-dining-source.ts", import.meta.url);
-const bundle = new URL("../tests/.audit-dining.node.mjs", import.meta.url);
+const suite = process.argv[2] || "dine-in";
+if (!["dine-in", "physical-tables", "floor-operations"].includes(suite))
+  throw new Error("Unknown test suite");
+const source = new URL(`../tests/.audit-${suite}-source.ts`, import.meta.url);
+const bundle = new URL(`../tests/.audit-${suite}.node.mjs`, import.meta.url);
 try {
   await pool.query(`CREATE SCHEMA ${schema}`);
   url.searchParams.set("options", `-c search_path=${schema},public`);
@@ -21,6 +24,9 @@ try {
     NODE_ENV: "test",
     DATABASE_URL: url.href,
     TEST_DINING_DATABASE_URL: url.href,
+    TEST_FLOOR_DATABASE_URL: url.href,
+    TEST_PHYSICAL_DATABASE_URL: url.href,
+    ALLOW_GUEST_BOOKING_MIGRATION: "yes",
     HOSTESS_BFF_KEY: "b".repeat(43),
     WHATSAPP_SERVICE_KEY: "w".repeat(43),
     COMMAND_CENTER_SERVICE_KEY: "s".repeat(43),
@@ -33,7 +39,7 @@ try {
   };
   writeFileSync(
     source,
-    readFileSync(new URL("../tests/dine-in.integration.test.ts", import.meta.url), "utf8").replace(
+    readFileSync(new URL(`../tests/${suite}.integration.test.ts`, import.meta.url), "utf8").replace(
       '"bun:test"',
       '"./node-test-adapter"',
     ),

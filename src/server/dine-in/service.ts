@@ -14,6 +14,7 @@ import {
   type Line,
 } from "./domain";
 import { earn, redeem, walletView, loyaltyLock, reverseLoyalty } from "./loyalty";
+import { acquireDiningSession, floorLock } from "../floor/lifecycle";
 
 export type Owner = { guestId: string | null; hash: string };
 export function exchangeOrigin() {
@@ -175,6 +176,8 @@ export async function checkout(owner: Owner, raw: unknown) {
     throw new ApiError(503, "PAYMENT_MODE_REQUIRED", "Оформление заказа временно отключено");
   return transaction(async (client) => {
     await loyaltyLock(client);
+    // Keep the physical mapping/visit lock before QR row locks, matching staff writers.
+    await floorLock(client);
     // Key lock before quote lock prevents two requests with the same key creating different orders.
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
       `checkout:${owner.hash}:${input.idempotencyKey}`,
@@ -226,16 +229,7 @@ export async function checkout(owner: Owner, raw: unknown) {
         "TABLE_DISABLED",
         "QR-код отключён или перевыпущен. Отсканируйте его заново",
       );
-    await client.query(
-      `INSERT INTO dining_sessions(venue_id,resource_id) VALUES($1,$2) ON CONFLICT(venue_id,resource_id) WHERE closed_at IS NULL DO NOTHING`,
-      [qr.venue_id, qr.resource_id],
-    );
-    const dining = (
-      await client.query(
-        "SELECT id FROM dining_sessions WHERE venue_id=$1 AND resource_id=$2 AND closed_at IS NULL",
-        [qr.venue_id, qr.resource_id],
-      )
-    ).rows[0];
+    const diningSessionId = await acquireDiningSession(client, qr.venue_id, qr.resource_id);
     const receiptToken = randomToken();
     const order = (
       await client.query(
@@ -244,7 +238,7 @@ export async function checkout(owner: Owner, raw: unknown) {
         [
           qr.venue_id,
           qr.resource_id,
-          dining.id,
+          diningSessionId,
           quote.id,
           owner.guestId,
           owner.hash,
@@ -303,6 +297,7 @@ export async function changeStatus(
 ) {
   return transaction(async (client) => {
     await loyaltyLock(client);
+    await floorLock(client);
     const order = (
       await client.query("SELECT * FROM dine_in_orders WHERE id=$1 AND venue_id=$2 FOR UPDATE", [
         id,
@@ -356,8 +351,7 @@ export async function changeStatus(
       await event(client, order, actor, "guest_linked", { guestId, retroactiveCashback: false });
     }
     await client.query(
-      `UPDATE dining_sessions s SET closed_at=now() WHERE s.id=$1 AND NOT EXISTS(
-      SELECT 1 FROM dine_in_orders o WHERE o.dining_session_id=s.id AND o.status NOT IN('closed','cancelled'))`,
+      `UPDATE dining_sessions SET last_activity_at=clock_timestamp(),version=version+1 WHERE id=$1 AND closed_at IS NULL`,
       [order.dining_session_id],
     );
     return orderDetail(client, id, venueId);

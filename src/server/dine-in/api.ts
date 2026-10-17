@@ -23,7 +23,15 @@ import {
 } from "./service";
 import { normalizePhone, statusNames, toMinor } from "./domain";
 import { ledger, loyaltyLock, walletView } from "./loyalty";
-import { printPanels, qrPng, qrSvg, tableUrl, zipFiles } from "./qr";
+import { printPanels, qrPng, qrSvg, zipFiles } from "./qr";
+import {
+  listRegistry,
+  bookingTargets,
+  saveRegistry,
+  bulkRegistry,
+  registryHistory,
+  registryDistribution,
+} from "../tables/registry";
 
 const uuid = z.string().uuid();
 const guestInput = z
@@ -54,18 +62,24 @@ async function staffAuth(request: Request, write: boolean, manager = false): Pro
   return staff;
 }
 export async function listQr(venueId: string) {
-  const tables = (
-    await pool.query(
-      `SELECT q.id,q.resource_id AS "resourceId",q.token,q.enabled,q.generation,q.issued_at AS "issuedAt",q.rotated_at AS "rotatedAt",
-    r.code,r.name,r.zone_id AS "zoneId",z.name AS "zoneName",m.legacy_code AS "legacyCode",
-    (m.verified_at IS NOT NULL) AS "mappingVerified",r.is_reservable AS "bookable"
-    FROM table_qr_codes q JOIN venue_resources r ON r.id=q.resource_id
-    JOIN venue_zones z ON z.id=r.zone_id LEFT JOIN venue_resource_mappings m ON m.resource_id=r.id
-    WHERE q.venue_id=$1 ORDER BY r.code`,
-      [venueId],
-    )
-  ).rows;
-  return tables.map((t) => ({ ...t, url: tableUrl(t.code, t.token) }));
+  return listRegistry(venueId);
+}
+async function selectedQr(venueId: string, url: URL) {
+  const tables = await listQr(venueId);
+  const ids = url.searchParams.get("ids")?.split(",").filter(Boolean);
+  if (ids) ids.forEach((id) => uuid.parse(id));
+  const zone = url.searchParams.get("zoneId");
+  if (zone) uuid.parse(zone);
+  const selected = tables.filter(
+    (table) => (!ids || ids.includes(table.resourceId)) && (!zone || table.zoneId === zone),
+  );
+  if (!selected.length)
+    throw new ApiError(
+      422,
+      "EMPTY_SELECTION",
+      "Выберите хотя бы одну точку для печати или экспорта",
+    );
+  return selected;
 }
 async function audit(
   client: import("pg").PoolClient,
@@ -293,6 +307,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
           /\/qr\/rotate$/.test(path) ||
           /\/cancel$/.test(path) ||
           path === "/tables/qr/bootstrap" ||
+          path === "/tables/qr/bulk" ||
           path === "/dine-in/outbox/retry" ||
           (method === "PATCH" && path.startsWith("/tables/"));
       const staff = await staffAuth(request, write, isSensitive),
@@ -333,6 +348,14 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         });
         return json({ tables: await listQr(v.id) });
       }
+      if (path === "/tables/qr/bulk" && method === "POST")
+        return json(await bulkRegistry(v.id, await body(request), staff));
+      const registry = /^\/tables\/([a-f0-9-]{36})\/registry$/.exec(path);
+      if (registry && method === "PATCH")
+        return json(await saveRegistry(v.id, uuid.parse(registry[1]), await body(request), staff));
+      const history = /^\/tables\/([a-f0-9-]{36})\/history$/.exec(path);
+      if (history && method === "GET")
+        return json({ history: await registryHistory(v.id, uuid.parse(history[1])) });
       const mapping = /^\/tables\/([a-f0-9-]{36})\/mapping$/.exec(path);
       if (mapping && method === "PATCH") {
         const id = uuid.parse(mapping[1]);
@@ -359,31 +382,39 @@ export async function handleDiningApi(request: Request): Promise<Response | null
           )
             throw new ApiError(404, "NOT_FOUND", "Стол не найден");
           await client.query(
-            `INSERT INTO venue_resource_mappings(resource_id,venue_id,legacy_code,verified_at,verified_by,note)
-            VALUES($1,$2,$3,CASE WHEN $4 THEN now() ELSE NULL END,CASE WHEN $4 THEN $5 ELSE NULL END,$6)
-            ON CONFLICT(resource_id) DO UPDATE SET legacy_code=EXCLUDED.legacy_code,verified_at=EXCLUDED.verified_at,verified_by=EXCLUDED.verified_by,note=EXCLUDED.note`,
+            `INSERT INTO venue_resource_mappings(resource_id,venue_id,legacy_code,verified_at,verified_by,note,relationship)
+            VALUES($1,$2,$3,CASE WHEN $4 THEN now() ELSE NULL END,CASE WHEN $4 THEN $5 ELSE NULL END,$6,CASE WHEN NOT $4 THEN 'pending' WHEN $3::text IS NULL THEN 'independent' ELSE 'linked' END)
+            ON CONFLICT(resource_id) DO UPDATE SET legacy_code=EXCLUDED.legacy_code,verified_at=EXCLUDED.verified_at,verified_by=EXCLUDED.verified_by,note=EXCLUDED.note,relationship=EXCLUDED.relationship,linked_resource_id=NULL`,
             [id, v.id, input.legacyCode, input.verified, staff.staff_id, input.reason],
+          );
+          await client.query(
+            "UPDATE venue_resources SET registry_version=registry_version+1 WHERE id=$1",
+            [id],
           );
           await audit(client, staff, "physical_mapping_updated", id, input);
         });
         return json({ tables: await listQr(v.id) });
       }
-      if (path === "/tables/qr" && method === "GET")
+      if (path === "/tables/qr" && method === "GET") {
+        const tables = await listQr(v.id);
         return json({
-          tables: await listQr(v.id),
+          tables,
+          distribution: registryDistribution(tables),
+          bookingTargets: await bookingTargets(v.id),
           zones: (
             await pool.query(
-              "SELECT id,name FROM venue_zones WHERE venue_code=$1 AND is_active ORDER BY display_order",
+              "SELECT id,name,code FROM venue_zones WHERE venue_code=$1 AND is_active ORDER BY display_order",
               [v.slug],
             )
           ).rows,
         });
+      }
       if (path === "/tables/qr/print" && method === "GET")
-        return new Response(printPanels(await listQr(v.id)), {
+        return new Response(printPanels(await selectedQr(v.id, url)), {
           headers: { ...responseHeaders, "content-type": "text/html; charset=utf-8" },
         });
       if (path === "/tables/qr/export.zip" && method === "GET") {
-        const tables = await listQr(v.id),
+        const tables = await selectedQr(v.id, url),
           files = tables.flatMap((t) => [
             { name: `xoxo-table-${t.code}.svg`, data: Buffer.from(qrSvg(t.url)) },
             { name: `xoxo-table-${t.code}.png`, data: qrPng(t.url) },
@@ -410,7 +441,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
           headers: {
             ...responseHeaders,
             "content-type": "application/zip",
-            "content-disposition": 'attachment; filename="xoxo-17-qr.zip"',
+            "content-disposition": `attachment; filename="xoxo-${tables.length}-qr.zip"`,
           },
         });
       }
@@ -480,7 +511,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
               [qr.id, change.enabled ?? null],
             );
             await client.query(
-              "UPDATE venue_resources SET name=COALESCE($2,name),zone_id=COALESCE($3,zone_id),updated_at=now() WHERE id=$1 AND venue_id=$4",
+              "UPDATE venue_resources SET name=COALESCE($2,name),zone_id=COALESCE($3,zone_id),updated_at=now(),registry_version=registry_version+1 WHERE id=$1 AND venue_id=$4",
               [id, change.name ?? null, change.zoneId ?? null, v.id],
             );
           }
@@ -573,6 +604,17 @@ export async function handleDiningApi(request: Request): Promise<Response | null
     }
     throw new ApiError(404, "NOT_FOUND", "Маршрут не найден");
   } catch (e) {
+    if (isStaff && path.startsWith("/tables/") && (e as { code?: string })?.code === "23P01")
+      return json(
+        {
+          error: {
+            code: "PHYSICAL_OCCUPIED",
+            message:
+              "У этого физического места есть будущая бронь, активное удержание или открытый визит. Завершите связанные операции перед изменением соответствия или вместимости.",
+          },
+        },
+        409,
+      );
     return failure(e);
   }
 }
