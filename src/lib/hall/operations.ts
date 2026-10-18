@@ -56,8 +56,8 @@ export interface MapPosition {
 }
 export function schematicPosition(index: number): MapPosition {
   return {
-    x: 40 + (index % 4) * 180,
-    y: 50 + Math.floor(index / 4) * 150,
+    x: 155 + (index % 3) * 235,
+    y: 165 + Math.floor(index / 3) * 155,
     width: 140,
     height: 90,
     rotation: 0,

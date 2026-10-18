@@ -15,7 +15,7 @@
     "start": "node scripts/start.mjs",
     "booking:preflight": "node scripts/booking-preflight.mjs",
     "test": "bun run test:unit && node scripts/test-integration.mjs",
-    "test:unit": "bun test tests/dine-in.unit.test.ts tests/floor-operations.unit.test.ts",
+    "test:unit": "bun test tests/dine-in.unit.test.ts tests/floor-operations.unit.test.ts tests/floor-viewport.unit.test.ts",
     "test:integration": "node scripts/test-integration.mjs"
   },
   "dependencies": {

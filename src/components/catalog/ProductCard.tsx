@@ -1,3 +1,4 @@
+import { productFallbackImage } from "../../lib/products/photos";
 import { formatKzt } from "../../lib/formatters/money";
 import { resolveProductImage } from "../../lib/products/images";
 import type { ExchangeProduct } from "../../lib/types/products";
@@ -21,7 +22,13 @@ export function ProductCard({
         src={resolveProductImage(product)}
         alt=""
         loading="lazy"
-        className="h-16 w-16 shrink-0 rounded-2xl bg-slate-50 object-cover"
+        onError={(event) => {
+          const fallback = productFallbackImage(product, true);
+          if (event.currentTarget.getAttribute("src") !== fallback)
+            event.currentTarget.src = fallback;
+          else event.currentTarget.style.opacity = "0";
+        }}
+        className="h-20 w-16 shrink-0 rounded-2xl bg-white object-contain p-1"
       />
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold">{product.name}</p>

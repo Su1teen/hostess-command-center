@@ -25,6 +25,7 @@ import {
 } from "../../lib/formatters/time";
 import { operationalDate } from "../../lib/hall/operations";
 import { FloorPlan } from "./FloorPlan";
+import { FloorDateTimePicker } from "./FloorDateTimePicker";
 import { FLOOR_STATE_LABEL, FLOOR_STATE_STYLE } from "../../lib/hall/presentation";
 import { FloorTimeline } from "./FloorTimeline";
 import { FloorTableDrawer } from "./FloorTableDrawer";
@@ -123,10 +124,6 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
     setClock(instant);
     setFilter({ mode: "now", date: almatyDateKey(instant), time: almatyTimeKey(instant) });
   }
-  function step(minutes: number) {
-    const next = addMinutesIso(at, minutes);
-    setFilter({ mode: "at", date: almatyDateKey(next), time: almatyTimeKey(next) });
-  }
   function select(id: string, nextEvent: FloorEvent | null = null) {
     setSelected(id);
     setEvent(nextEvent);
@@ -213,50 +210,12 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
           )}
         </div>
         {filters.mode !== "now" ? (
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="min-w-0 text-xs text-slate-500">
-              {filters.mode === "day" ? "Операционный день" : "Календарная дата"}
-              <input
-                type="date"
-                aria-label="Дата карты"
-                value={filters.date}
-                onChange={(e) => {
-                  if (e.target.value) setFilter({ date: e.target.value });
-                }}
-                className={`${controlClass} mt-1 block max-w-full min-w-0`}
-              />
-            </label>
-            {filters.mode === "at" && (
-              <>
-                <label className="text-xs text-slate-500">
-                  Время
-                  <input
-                    type="time"
-                    aria-label="Время карты"
-                    value={filters.time}
-                    onChange={(e) => {
-                      if (e.target.value) setFilter({ time: e.target.value });
-                    }}
-                    className={`${controlClass} mt-1 block`}
-                  />
-                </label>
-                <div className="flex gap-1">
-                  {[-30, -15, 15, 30].map((minutes) => (
-                    <button
-                      key={minutes}
-                      type="button"
-                      className={`${controlClass} px-2!`}
-                      aria-label={`${minutes > 0 ? "Вперёд" : "Назад"} ${Math.abs(minutes)} минут`}
-                      onClick={() => step(minutes)}
-                    >
-                      {minutes > 0 ? "+" : "−"}
-                      {Math.abs(minutes)}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+          <FloorDateTimePicker
+            date={filters.date}
+            time={filters.time}
+            dateOnly={filters.mode === "day"}
+            onChange={(value) => setFilter(value)}
+          />
         ) : (
           <p className="text-sm font-medium tabular-nums">{formatDateTimeAlmaty(clock)}</p>
         )}
@@ -451,6 +410,7 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
                   <FloorLayoutEditor key={zone.id} zone={zone} onDone={() => setEditing(false)} />
                 ) : filters.view === "map" ? (
                   <FloorPlan
+                    zoneName={zone.name}
                     resources={resources}
                     selectedId={selectedId}
                     onSelect={(id) => select(id)}

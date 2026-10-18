@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useId, useRef, useState, type PointerEvent } from "react";
 import { Maximize2, Minus, Plus } from "lucide-react";
 import type { FloorResource } from "../../lib/floor-operations";
 import type { MapPosition } from "../../lib/hall/operations";
@@ -8,11 +8,12 @@ import {
   FLOOR_STATE_LABEL,
 } from "../../lib/hall/presentation";
 
-const WIDTH = 1000,
-  HEIGHT = 700;
+import { boundedView, PLAN_WIDTH as WIDTH, PLAN_HEIGHT as HEIGHT } from "../../lib/hall/viewport";
+import { RoomFurniture, TableFurniture } from "./FloorFurniture";
 type Point = { x: number; y: number };
 export function FloorPlan({
   resources,
+  zoneName = "Зал",
   selectedId,
   onSelect,
   editing = false,
@@ -20,16 +21,20 @@ export function FloorPlan({
   onPosition,
 }: {
   resources: FloorResource[];
+  zoneName?: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
   editing?: boolean;
   positions?: Record<string, MapPosition>;
   onPosition?: (id: string, position: MapPosition) => void;
 }) {
+  const patternId = useId().replace(/:/g, "");
+  const gaming = /пс|ps|playstation|общий/i.test(zoneName);
   const host = useRef<HTMLDivElement>(null),
     svg = useRef<SVGSVGElement>(null);
-  const [zoom, setZoom] = useState(1),
-    [pan, setPan] = useState({ x: 0, y: 0 });
+  const [view, setView] = useState(() => boundedView(1, { x: 0, y: 0 }));
+  const { zoom, pan } = view;
+  const panning = useRef<{ start: Point; pan: Point } | null>(null);
   const [viewport, setViewport] = useState({ width: WIDTH, scale: 1 });
   const pointers = useRef(new Map<number, Point>());
   const pinch = useRef<{ distance: number; zoom: number; midpoint: Point; pan: Point } | null>(
@@ -52,14 +57,22 @@ export function FloorPlan({
   }, []);
   const zoneId = resources[0]?.zoneId;
   useEffect(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
+    setView(boundedView(1, { x: 0, y: 0 }));
   }, [zoneId]);
-  const changeZoom = (value: number) => setZoom(Math.min(3, Math.max(0.8, value)));
+  const changeZoom = (value: number) => setView((previous) => boundedView(value, previous.pan));
+  const canvasPoint = (position: Point): Point => {
+    const matrix = svg.current?.getScreenCTM();
+    if (!matrix) return position;
+    const result = new DOMPoint(position.x, position.y).matrixTransform(matrix.inverse());
+    return { x: result.x, y: result.y };
+  };
   const point = (e: PointerEvent): Point => ({ x: e.clientX, y: e.clientY });
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     pointers.current.set(e.pointerId, point(e));
     gestureMoved.current = false;
+    if (zoom > 1 && !editing && pointers.current.size === 1) {
+      panning.current = { start: point(e), pan };
+    }
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       pinch.current = {
@@ -70,6 +83,7 @@ export function FloorPlan({
       };
       for (const id of pointers.current.keys()) e.currentTarget.setPointerCapture(id);
       dragging.current = null;
+      panning.current = null;
     }
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
@@ -78,29 +92,35 @@ export function FloorPlan({
     if (pointers.current.size >= 2 && pinch.current) {
       const [a, b] = [...pointers.current.values()],
         original = pinch.current;
-      changeZoom(
+      const nextZoom = boundedView(
         (original.zoom * Math.hypot(a.x - b.x, a.y - b.y)) / Math.max(1, original.distance),
+        original.pan,
+      ).zoom;
+      const from = canvasPoint(original.midpoint);
+      const to = canvasPoint({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      const ratio = nextZoom / original.zoom;
+      setView(
+        boundedView(nextZoom, {
+          x: to.x - WIDTH / 2 - (from.x - WIDTH / 2 - original.pan.x) * ratio,
+          y: to.y - HEIGHT / 2 - (from.y - HEIGHT / 2 - original.pan.y) * ratio,
+        }),
       );
-      const rect = host.current?.getBoundingClientRect();
-      setPan({
-        x: Math.max(
-          -WIDTH,
-          Math.min(
-            WIDTH,
-            original.pan.x +
-              (((a.x + b.x) / 2 - original.midpoint.x) * WIDTH) / (rect?.width ?? WIDTH),
-          ),
-        ),
-        y: Math.max(
-          -HEIGHT,
-          Math.min(
-            HEIGHT,
-            original.pan.y +
-              (((a.y + b.y) / 2 - original.midpoint.y) * HEIGHT) / (rect?.height ?? HEIGHT),
-          ),
-        ),
-      });
       gestureMoved.current = true;
+    } else if (panning.current) {
+      const from = canvasPoint(panning.current.start),
+        to = canvasPoint(point(e));
+      if (
+        Math.hypot(e.clientX - panning.current.start.x, e.clientY - panning.current.start.y) > 5
+      ) {
+        gestureMoved.current = true;
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
+      setView(
+        boundedView(zoom, {
+          x: panning.current.pan.x + to.x - from.x,
+          y: panning.current.pan.y + to.y - from.y,
+        }),
+      );
     } else if (editing && dragging.current && svg.current) {
       const drag = dragging.current,
         matrix = svg.current.getScreenCTM();
@@ -118,7 +138,12 @@ export function FloorPlan({
   const finish = (e: PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
-    if (!pointers.current.size) dragging.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId))
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    if (!pointers.current.size) {
+      dragging.current = null;
+      panning.current = null;
+    }
   };
   const missing = resources.some(
     (resource) => resource.layout.x === null || resource.layout.y === null,
@@ -132,7 +157,7 @@ export function FloorPlan({
         <p className="text-xs text-slate-500">
           {editing
             ? "Перетащите стол или используйте стрелки клавиатуры"
-            : "Выберите стол · масштаб двумя пальцами"}
+            : "Выберите стол · увеличьте для деталей"}
         </p>
         <div className="flex gap-1">
           <button
@@ -156,8 +181,7 @@ export function FloorPlan({
             aria-label="Показать всю карту"
             className="min-h-11 rounded-lg p-3 hover:bg-slate-100"
             onClick={() => {
-              setZoom(1);
-              setPan({ x: 0, y: 0 });
+              setView(boundedView(1, { x: 0, y: 0 }));
             }}
           >
             <Maximize2 size={16} />
@@ -165,19 +189,16 @@ export function FloorPlan({
         </div>
       </div>
       {missing && (
-        <p className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-          Расположение не настроено. Столы без координат показаны в схематической сетке; она не
-          описывает помещение.
+        <p className="border-b border-stone-100 bg-stone-50 px-4 py-2 text-[11px] text-stone-500">
+          Схема зоны · точное расположение столов можно уточнить в редакторе
         </p>
       )}
       <div
         ref={host}
-        className="relative overflow-hidden bg-slate-50/50"
+        className="relative overflow-hidden bg-[#f8f5ef]"
         style={{
-          touchAction: editing ? "none" : "pan-y",
-          aspectRatio: "10 / 7",
-          minHeight: 280,
-          maxHeight: 600,
+          touchAction: editing || zoom > 1 ? "none" : "pan-y",
+          height: "clamp(300px, 70vw, 560px)",
         }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -187,18 +208,24 @@ export function FloorPlan({
         <svg
           ref={svg}
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          className="h-full min-h-[280px] w-full"
+          className="absolute inset-0 h-full w-full select-none"
           aria-label="Столы выбранной зоны"
         >
           <defs>
-            <pattern id="floor-dots" width="25" height="25" patternUnits="userSpaceOnUse">
-              <circle cx="1" cy="1" r="1" fill="#dce3eb" />
-            </pattern>
+            <filter id={`table-shadow-${patternId}`} x="-30%" y="-40%" width="160%" height="180%">
+              <feDropShadow
+                dx="0"
+                dy="5"
+                stdDeviation="5"
+                floodColor="#584a34"
+                floodOpacity="0.14"
+              />
+            </filter>
           </defs>
-          <rect width={WIDTH} height={HEIGHT} fill="url(#floor-dots)" />
           <g
             transform={`translate(${WIDTH / 2 + pan.x},${HEIGHT / 2 + pan.y}) scale(${zoom}) translate(${-WIDTH / 2},${-HEIGHT / 2})`}
           >
+            <RoomFurniture gaming={gaming} title={zoneName} />
             {resources.map((resource, index) => {
               const p = positions?.[resource.id] ?? resourcePosition(resource, index),
                 style = FLOOR_STATE_STYLE[resource.state];
@@ -262,6 +289,7 @@ export function FloorPlan({
                     {resource.name} · {FLOOR_STATE_LABEL[resource.state]}
                     {resource.capacity ? ` · ${resource.capacity} мест` : ""}
                   </title>
+                  <TableFurniture resource={resource} position={p} gaming={gaming} />
                   <rect
                     data-floor-hit-target=""
                     x={(p.width - hitWidth) / 2}
@@ -286,20 +314,21 @@ export function FloorPlan({
                     height={p.height}
                     rx={p.shape === "round" ? Math.min(p.width, p.height) / 2 : 14}
                     fill={style.fill}
+                    filter={`url(#table-shadow-${patternId})`}
                     stroke={style.stroke}
                     strokeWidth={2}
                   />
+                  <circle cx={18} cy={18} r={5} fill={style.stroke} aria-hidden="true" />
                   {compact ? (
                     <text
                       x={p.width / 2}
-                      y={p.height / 2 + 5 / pixelsPerUnit}
+                      y={p.height / 2 + 10}
                       textAnchor="middle"
-                      fontSize={14 / pixelsPerUnit}
+                      fontSize={Math.min(29, 13 / pixelsPerUnit)}
                       fontWeight={600}
                       aria-hidden="true"
                     >
                       <tspan fill="#172033">{resource.code}</tspan>
-                      <tspan fill={style.text}> {style.mark}</tspan>
                     </text>
                   ) : (
                     <>
@@ -336,6 +365,10 @@ export function FloorPlan({
             })}
           </g>
         </svg>
+      </div>
+      <div className="flex items-center justify-between border-t border-stone-100 px-4 py-2 text-[11px] text-stone-500">
+        <span>{gaming ? "Диваны · игровые столы · экраны" : "Столы · кресла · лаунж"}</span>
+        <span className="tabular-nums">{Math.round(zoom * 100)}%</span>
       </div>
       {!resources.length && (
         <p className="p-6 text-center text-sm text-slate-500">

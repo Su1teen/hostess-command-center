@@ -80,7 +80,7 @@ export function ProductEditSheet({
         <img
           src={resolveProductImage(product)}
           alt=""
-          className="h-20 w-20 rounded-2xl bg-slate-50 object-cover"
+          className="h-24 w-20 rounded-2xl bg-white object-contain p-1"
         />
         <div>
           <p className="text-[11px] uppercase tracking-wide text-slate-500">Текущая цена</p>
