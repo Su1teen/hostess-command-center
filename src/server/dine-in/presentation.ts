@@ -6,6 +6,8 @@ type Amounts = {
   cashbackMinor: string | number;
 };
 type Item = {
+  itemType?: "EXCHANGE" | "REGULAR_MENU";
+  menuVersion?: number | null;
   productId: string;
   name: string;
   quantity: number;
@@ -23,6 +25,8 @@ export function majorTotals(value: Amounts) {
 export function guestLines(items: Item[]) {
   return items.map((i) => ({
     productId: i.productId,
+    itemType: i.itemType ?? "EXCHANGE",
+    menuVersion: i.menuVersion ?? null,
     productName: i.name,
     quantity: i.quantity,
     unitPrice: Number(i.unitPriceMinor) / 100,

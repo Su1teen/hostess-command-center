@@ -139,6 +139,10 @@ try {
   const beforeCredentials = (
     await pool.query(`SELECT resource_id,token FROM ${schema}.table_qr_codes ORDER BY resource_id`)
   ).rows;
+  const menuItem = (
+    await pool.query(`INSERT INTO ${schema}.venue_menu_items(venue_id,name,description,category,portion,price_minor,published)
+    SELECT id,'UI Kitchen','Isolated verified kitchen fixture','Кухня','250 г',245050,true FROM ${schema}.hostess_venues WHERE slug='xoxo' RETURNING id`)
+  ).rows[0];
   await new Promise((resolve) => exchange.listen(19092, "127.0.0.1", resolve));
   await new Promise((resolve) => proxy.listen(3443, "127.0.0.1", resolve));
   app = spawn(process.execPath, ["scripts/start.mjs"], { env, stdio: "inherit" });
@@ -169,7 +173,13 @@ try {
       "x-hostess-service-key": key,
       "x-hostess-client-id": "ui-fixture",
     },
-    body: JSON.stringify({ qrToken: table.token, items: [{ productId, quantity: 3 }] }),
+    body: JSON.stringify({
+      qrToken: table.token,
+      items: [
+        { productId, quantity: 3 },
+        { productId: menuItem.id, quantity: 1, itemType: "REGULAR_MENU" },
+      ],
+    }),
   });
   assert(
     quote.status === 201,
@@ -206,9 +216,60 @@ try {
   await page.reload();
   await page.getByText("№" + order.number + " · Стол " + order.tableCode, { exact: true }).click();
   await page.getByRole("button", { name: "Готовится", exact: true }).waitFor();
+  for (const width of [360, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    assert(
+      (await page.getByRole("dialog").getByText("UI Kitchen", { exact: false }).count()) > 0,
+      "Mixed order missing kitchen line",
+    );
+    assert(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      "Order drawer overflow",
+    );
+    await page.screenshot({ path: `test-results/order-drawer-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press("Escape");
   await page.getByRole("textbox", { name: "Поиск заказов" }).fill("not-an-order");
   await page.getByText("Заказов по выбранным условиям нет.").waitFor();
   console.log("PASS mobile order details, amounts, state change, filters and reload");
+  await page.goto("https://localhost:3443/menu");
+  await page.getByRole("heading", { name: "Меню", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Добавить блюдо", exact: true }).click();
+  const menuDrawer = page.getByRole("dialog");
+  await menuDrawer.getByLabel("Название", { exact: true }).fill("UI Persisted Dish");
+  await menuDrawer.getByLabel("Цена, ₸", { exact: true }).fill("2300.50");
+  await menuDrawer.getByLabel("Порция / объём", { exact: true }).fill("180 г");
+  await menuDrawer
+    .getByLabel("Описание / состав", { exact: true })
+    .fill("Проверенная тестовая позиция");
+  await menuDrawer.getByLabel("Опубликовать для гостей", { exact: true }).check();
+  await menuDrawer.getByRole("button", { name: "Сохранить блюдо", exact: true }).click();
+  await menuDrawer.waitFor({ state: "hidden" });
+  await page.reload();
+  await page.getByRole("heading", { name: "UI Persisted Dish", exact: true }).waitFor();
+  for (const width of [360, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    assert(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      "Menu overflow",
+    );
+    await page.screenshot({ path: `test-results/menu-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  const catalog = await fetch(
+    "http://localhost:3000/api/guest/v1/dine-in/regular-menu?venue=xoxo",
+    { headers: { "x-hostess-service-key": key, "x-hostess-client-id": "menu-ui" } },
+  );
+  assert(
+    (await catalog.json()).items.some(
+      (item) => item.name === "UI Persisted Dish" && item.priceMinor === "230050",
+    ),
+    "Published menu did not reach guest API",
+  );
+  console.log(
+    "PASS real persisted menu publish/reload and guest price parity at 360/390/430/768/1440",
+  );
   await page.goto("https://localhost:3443/guests");
   await page.getByLabel("Имя гостя", { exact: true }).fill("UI Guest");
   await page.getByLabel("Телефон гостя", { exact: true }).fill("87015558899");
@@ -625,6 +686,13 @@ try {
   await safari.getByRole("dialog").getByLabel("Название", { exact: true }).waitFor();
   await safari.keyboard.press("Escape");
   await safari.getByRole("dialog").waitFor({ state: "hidden" });
+  await safari.goto("https://localhost:3443/menu");
+  await safari.getByRole("heading", { name: "UI Persisted Dish", exact: true }).waitFor();
+  await safari.screenshot({ path: "test-results/menu-webkit-375.png", fullPage: true });
+  await safari.goto(`https://localhost:3443/orders?order=${order.id}`);
+  await safari.getByRole("dialog").getByText("UI Kitchen", { exact: false }).waitFor();
+  await safari.screenshot({ path: "test-results/order-webkit-375.png", fullPage: true });
+  await safari.keyboard.press("Escape");
   await safari.goto("https://localhost:3443/");
   await safari.getByRole("heading", { name: "Карта зала", exact: true }).waitFor();
   await safari

@@ -17,6 +17,7 @@ import {
   saveFloorLayout,
 } from "../src/server/floor/service";
 import { listVenueAvailability, selectReservableResource } from "../src/server/guest/inventory";
+import { occupancySignals } from "../src/server/dine-in/menu";
 
 if (
   !process.env.TEST_FLOOR_DATABASE_URL?.includes("127.0.0.1") ||
@@ -103,6 +104,37 @@ test("operational day is Almaty 17:00–04:00 and midnight belongs to previous o
     endsAt: "2035-10-17T23:00:00.000Z",
   });
   expect(operationalDay("2035-10-18").startsAt).toBe("2035-10-18T12:00:00.000Z");
+});
+
+test("occupancy counts confirmed seating only, never QR activity or unknown coverage", async () => {
+  const unknown = (await occupancySignals(["not-connected"])).signals[0];
+  expect(unknown).toMatchObject({ valuePercent: null, level: "unknown", source: "unavailable" });
+  const before = (await occupancySignals(["xoxo"])).signals[0];
+  expect(before).toMatchObject({
+    valuePercent: 0,
+    capacity: 17,
+    occupiedUnits: 0,
+    source: "staff_confirmed",
+  });
+  await submit(16);
+  expect((await occupancySignals(["xoxo"])).signals[0].occupiedUnits).toBe(0);
+  const seated = await seatGuests(venueId, "operator", {
+    resourceId: tables[16].resource_id,
+    guests: 2,
+    expectedEndAt: future(60),
+    idempotencyKey: randomToken(),
+  });
+  expect((await occupancySignals(["xoxo"])).signals[0]).toMatchObject({
+    valuePercent: 6,
+    capacity: 17,
+    occupiedUnits: 1,
+  });
+  await releaseGuests(venueId, "operator", seated.session.id, {
+    version: seated.session.version,
+    reason: "Occupancy fixture finished",
+    idempotencyKey: randomToken(),
+  });
+  expect((await occupancySignals(["xoxo"])).signals[0].occupiedUnits).toBe(0);
 });
 
 test("staff RBAC, origin protection and no public folio capability", async () => {

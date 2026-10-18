@@ -60,7 +60,9 @@ export type DineOrder = {
     quantity: number;
     unitPriceMinor: string;
     totalMinor: string;
-    roundId: string;
+    roundId: string | null;
+    itemType?: "EXCHANGE" | "REGULAR_MENU";
+    menuVersion?: number | null;
   }[];
   events: {
     id: string;

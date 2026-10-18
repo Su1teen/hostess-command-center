@@ -1,5 +1,6 @@
 import { getById } from "../repositories/reservations.repository";
 import { handleDiningApi, guestDiningSummary } from "../dine-in/api";
+import { handleShiftRead } from "../dine-in/shift";
 import { handleFloorApi } from "../floor/api";
 import { mergeDiningGuest, mergeVerifiedStaffGuests } from "../dine-in/loyalty";
 import { z } from "zod";
@@ -194,6 +195,8 @@ async function reservationList(
 }
 
 export async function handleBookingApi(request: Request): Promise<Response | null> {
+  const shift = await handleShiftRead(request);
+  if (shift) return shift;
   const floor = await handleFloorApi(request);
   if (floor) return floor;
   const dining = await handleDiningApi(request);

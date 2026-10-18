@@ -24,6 +24,7 @@ import {
 import { normalizePhone, statusNames, toMinor } from "./domain";
 import { ledger, loyaltyLock, walletView } from "./loyalty";
 import { printPanels, qrPng, qrSvg, zipFiles } from "./qr";
+import { menuCatalog, saveMenuItem, occupancySignals } from "./menu";
 import {
   listRegistry,
   bookingTargets,
@@ -180,7 +181,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
   if (!isGuest && !isStaff) return null;
   const path = url.pathname.slice((isGuest ? "/api/guest/v1" : "/api/staff/v1").length),
     method = request.method;
-  const newPath = /^\/(dine-in|loyalty|tables)(\/|$)/.test(path);
+  const newPath = /^\/(dine-in|loyalty|tables|occupancy)(\/|$)/.test(path);
   const guestWrite =
     isStaff &&
     ((path === "/guests" && method === "POST") ||
@@ -193,6 +194,18 @@ export async function handleDiningApi(request: Request): Promise<Response | null
       if (serviceActor(request) !== "bff")
         throw new ApiError(403, "BFF_REQUIRED", "Маршрут доступен через Hostess");
       await rateLimit(`dining:${request.headers.get("x-hostess-client-id") ?? "unknown"}`, 120);
+      if (path === "/occupancy" && method === "GET") {
+        const slugs = z
+          .array(z.string().regex(/^[a-z0-9-]{1,80}$/))
+          .min(1)
+          .max(100)
+          .parse((url.searchParams.get("venues") ?? "xoxo").split(","));
+        return json(await occupancySignals([...new Set(slugs)]));
+      }
+      if (path === "/dine-in/regular-menu" && method === "GET") {
+        const v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
+        return json(await menuCatalog(v.id, v.slug));
+      }
       const tableMatch = /^\/dine-in\/tables\/([A-Za-z0-9_-]{43,64})$/.exec(path);
       if (tableMatch && method === "GET") {
         const t = await findTable(pool, tableMatch[1]);
@@ -304,6 +317,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
     } else {
       const write = method !== "GET",
         isSensitive =
+          (write && path.startsWith("/dine-in/menu-items")) ||
           /\/qr\/rotate$/.test(path) ||
           /\/cancel$/.test(path) ||
           path === "/tables/qr/bootstrap" ||
@@ -312,6 +326,15 @@ export async function handleDiningApi(request: Request): Promise<Response | null
           (method === "PATCH" && path.startsWith("/tables/"));
       const staff = await staffAuth(request, write, isSensitive),
         v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
+      if (path === "/dine-in/menu-items" && method === "GET")
+        return json(await menuCatalog(v.id, v.slug, true));
+      if (path === "/dine-in/menu-items" && method === "POST")
+        return json({ item: await saveMenuItem(v.id, staff, await body(request)) }, 201);
+      const menuMatch = /^\/dine-in\/menu-items\/([a-f0-9-]{36})$/.exec(path);
+      if (menuMatch && method === "PATCH")
+        return json({
+          item: await saveMenuItem(v.id, staff, await body(request), uuid.parse(menuMatch[1])),
+        });
       if (guestWrite) {
         const match = /^\/guests\/([a-f0-9-]{36})$/.exec(path);
         return json({ guest: await saveGuest(request, staff, match?.[1]) }, match ? 200 : 201);

@@ -18,6 +18,7 @@ import { handleBookingApi } from "../src/server/guest/api";
 import { createQuote, checkout, changeStatus, type Owner } from "../src/server/dine-in/service";
 import { wallets, walletView, loyaltyLock, mergeDiningGuest } from "../src/server/dine-in/loyalty";
 import { drainOutbox } from "../src/server/dine-in/outbox";
+import { saveMenuItem } from "../src/server/dine-in/menu";
 
 if (
   !process.env.TEST_DINING_DATABASE_URL?.includes("127.0.0.1") ||
@@ -41,6 +42,7 @@ let invalidAck = false,
   retryStatus = 0;
 const staff: Record<string, string> = {},
   delivered: string[] = [];
+let historicalOrderId: string;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (String(input).endsWith("/api/v1/public/snapshot")) {
     if (unavailable) throw new Error("offline");
@@ -172,10 +174,28 @@ beforeAll(async () => {
   );
   for (const file of readdirSync(new URL("../src/server/db/migrations/", import.meta.url))
     .filter((name) => name.endsWith(".sql") && name > "0007_physical_inventory_mapping.sql")
-    .sort())
+    .sort()) {
+    if (file === "0010_regular_menu.sql") {
+      const historic = await pool.query(
+        `WITH visit AS (
+        INSERT INTO dining_sessions(venue_id,resource_id,opened_at,closed_at,visit_status)
+        SELECT venue_id,resource_id,now()-interval '2 days',now()-interval '1 day','released' FROM table_qr_codes LIMIT 1 RETURNING id,venue_id,resource_id
+      ), quote AS (
+        INSERT INTO dine_in_quotes(venue_id,qr_id,qr_generation,owner_hash,lines,round_id,subtotal_minor,discount_minor,payable_minor,cashback_minor,expires_at)
+        SELECT venue_id,id,generation,'historical-owner','[]',$1,159000,0,159000,0,now()+interval '1 minute' FROM table_qr_codes LIMIT 1 RETURNING id,venue_id
+      ), saved AS (
+        INSERT INTO dine_in_orders(venue_id,table_resource_id,dining_session_id,quote_id,owner_hash,receipt_hash,idempotency_key,subtotal_minor,discount_minor,payable_minor,cashback_minor,payment_status,status)
+        SELECT visit.venue_id,visit.resource_id,visit.id,quote.id,'historical-owner','historical-receipt','historical-key',159000,0,159000,0,'assumed_paid','closed' FROM visit JOIN quote ON quote.venue_id=visit.venue_id RETURNING id,venue_id
+      ) INSERT INTO dine_in_order_items(venue_id,order_id,exchange_product_id,round_id,name,quantity,unit_price_minor,total_minor)
+        SELECT venue_id,id,$2,$1,'Historical published drink',1,159000,159000 FROM saved RETURNING order_id`,
+        [roundId, productId],
+      );
+      historicalOrderId = historic.rows[0].order_id;
+    }
     await pool.query(
       readFileSync(new URL("../src/server/db/migrations/" + file, import.meta.url), "utf8"),
     );
+  }
   venueId = (await pool.query("SELECT id FROM hostess_venues WHERE slug='xoxo'")).rows[0].id;
   for (const role of ["viewer", "operator", "manager"])
     staff[role] = (await transaction((c) => newSession(c, null, role, role))).split(";")[0];
@@ -1054,4 +1074,198 @@ test("outbox retains 429/5xx for retry and recovers an expired delivery lease", 
     retryStatus = 0;
     process.env.DINE_IN_OUTBOX_ENABLED = "no";
   }
+});
+
+test("regular menu migration preserves historical exchange identity and prices", async () => {
+  const row = (
+    await pool.query(
+      "SELECT source,item_type,exchange_product_id,round_id,unit_price_minor::text,menu_item_id FROM dine_in_order_items WHERE order_id=$1",
+      [historicalOrderId],
+    )
+  ).rows[0];
+  expect(row).toMatchObject({
+    source: "exchange",
+    item_type: "EXCHANGE",
+    exchange_product_id: productId,
+    round_id: roundId,
+    unit_price_minor: "159000",
+    menu_item_id: null,
+  });
+});
+
+const managerSession = { guest_id: null, staff_id: "manager", role: "manager" as const };
+const dishInput = {
+  name: "Verified test dish",
+  description: "Real fixture ingredients",
+  category: "Kitchen",
+  priceMinor: 245050,
+  isAvailable: true,
+  published: true,
+  imageUrl: "https://example.test/dish.webp",
+  portion: "250 g",
+  allergens: ["Milk"],
+};
+const dish = () => saveMenuItem(venueId, managerSession, dishInput);
+
+test("published menu survives API reload, rejects stale edits and enforces manager plus exact origin", async () => {
+  const path = "/api/staff/v1/dine-in/menu-items";
+  expect((await api(path, dishInput, { cookie: staff.viewer })).status).toBe(403);
+  expect((await api(path, dishInput, { cookie: staff.operator })).status).toBe(403);
+  expect(
+    (await api(path, dishInput, { cookie: staff.manager, origin: "https://foreign.test" })).status,
+  ).toBe(403);
+  const saved = await api(path, { ...dishInput, published: false }, { cookie: staff.manager });
+  expect(saved.status).toBe(201);
+  const item = (await saved.json()).item;
+  const publicCatalog = async () =>
+    await (await api("/api/guest/v1/dine-in/regular-menu?venue=xoxo")).json();
+  expect((await publicCatalog()).items.some((row: { id: string }) => row.id === item.id)).toBe(
+    false,
+  );
+  expect(
+    (
+      await api(
+        `${path}/${item.id}`,
+        { ...dishInput, version: 1 },
+        { cookie: staff.manager, method: "PATCH" },
+      )
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await api(
+        `${path}/${item.id}`,
+        { ...dishInput, version: 1 },
+        { cookie: staff.manager, method: "PATCH" },
+      )
+    ).status,
+  ).toBe(409);
+  expect(
+    (await publicCatalog()).items.find((row: { id: string }) => row.id === item.id),
+  ).toMatchObject({
+    price: 2450.5,
+    priceMinor: "245050",
+    version: 2,
+    portion: "250 g",
+    allergens: ["Milk"],
+  });
+  expect((await api(path, undefined, { cookie: staff.viewer })).status).toBe(200);
+});
+
+test("regular-only anonymous checkout stays available while exchange is offline and creates no market demand", async () => {
+  const item = await dish(),
+    owner = anon();
+  unavailable = true;
+  try {
+    const q = await createQuote(owner, {
+      qrToken: table.token,
+      items: [{ productId: item.id, quantity: 2, itemType: "REGULAR_MENU" }],
+    });
+    expect(q.roundId).toBeNull();
+    expect(q.subtotalMinor).toBe(490100);
+    const saved = await checkout(owner, { quoteId: q.id, idempotencyKey: randomToken() });
+    expect(saved.order.cashbackMinor).toBe("0");
+    expect(saved.order.items[0]).toMatchObject({
+      productId: item.id,
+      itemType: "REGULAR_MENU",
+      roundId: null,
+      menuVersion: 1,
+      totalMinor: "490100",
+    });
+    expect(
+      (await pool.query("SELECT id FROM integration_outbox WHERE order_id=$1", [saved.order.id]))
+        .rowCount,
+    ).toBe(0);
+  } finally {
+    unavailable = false;
+  }
+});
+
+test("mixed checkout has one authoritative order, earns once and only exchange lines emit accepted/cancelled events", async () => {
+  const item = await dish(),
+    g = await guest();
+  const q = await createQuote(g.owner, {
+    qrToken: table.token,
+    items: [
+      { productId: item.id, quantity: 2, itemType: "REGULAR_MENU" },
+      { productId, quantity: 1 },
+    ],
+  });
+  expect(q.subtotalMinor).toBe(649100);
+  expect(q.cashbackMinor).toBe(19400);
+  const input = { quoteId: q.id, idempotencyKey: randomToken() };
+  const [a, b] = await Promise.all([checkout(g.owner, input), checkout(g.owner, input)]);
+  expect(a.order.id).toBe(b.order.id);
+  expect(a.order.items.length).toBe(2);
+  expect(
+    (await pool.query("SELECT id FROM integration_outbox WHERE order_id=$1", [a.order.id]))
+      .rowCount,
+  ).toBe(1);
+  expect((await balance(g.id)).balanceMinor).toBe(19400);
+  await changeStatus(a.order.id, venueId, "manager", undefined, "Mixed test cancellation");
+  await changeStatus(a.order.id, venueId, "manager", undefined, "Mixed test cancellation");
+  expect((await balance(g.id)).balanceMinor).toBe(0);
+  expect(
+    (await pool.query("SELECT id FROM integration_outbox WHERE order_id=$1", [a.order.id]))
+      .rowCount,
+  ).toBe(2);
+});
+
+test("menu revision and availability changes require a fresh quote without partial financial writes", async () => {
+  const item = await dish(),
+    owner = anon();
+  const q = await createQuote(owner, {
+    qrToken: table.token,
+    items: [{ productId: item.id, quantity: 1, itemType: "REGULAR_MENU" }],
+  });
+  await saveMenuItem(
+    venueId,
+    managerSession,
+    { ...dishInput, priceMinor: 260000, version: 1 },
+    item.id,
+  );
+  await expect(
+    checkout(owner, { quoteId: q.id, idempotencyKey: randomToken() }),
+  ).rejects.toMatchObject({ code: "REQUOTE" });
+  expect(
+    (await pool.query("SELECT id FROM dine_in_orders WHERE quote_id=$1", [q.id])).rowCount,
+  ).toBe(0);
+  const next = await createQuote(owner, {
+    qrToken: table.token,
+    items: [{ productId: item.id, quantity: 1, itemType: "REGULAR_MENU" }],
+  });
+  await saveMenuItem(
+    venueId,
+    managerSession,
+    { ...dishInput, isAvailable: false, version: 2 },
+    item.id,
+  );
+  await expect(
+    checkout(owner, { quoteId: next.id, idempotencyKey: randomToken() }),
+  ).rejects.toMatchObject({ code: "PRODUCT_UNAVAILABLE" });
+  await expect(
+    createQuote(owner, { qrToken: table.token, items: [{ productId: item.id, quantity: 1 }] }),
+  ).rejects.toMatchObject({ code: "PRODUCT_UNAVAILABLE" });
+});
+
+test("XOXO staff read contract returns canonical menu and mixed orders only with service key", async () => {
+  const path = "https://command.test/api/service/v1/dine-in/orders?scope=recent";
+  expect((await handleBookingApi(new Request(path)))?.status).toBe(401);
+  const headers = { "x-command-center-key": process.env.COMMAND_CENTER_SERVICE_KEY! };
+  const response = (await handleBookingApi(new Request(path, { headers })))!;
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  const read = await response.json();
+  expect(read.source).toBe("command_center");
+  const mixedId = (
+    await pool.query(`SELECT o.id FROM dine_in_orders o JOIN dine_in_order_items i
+    ON i.order_id=o.id GROUP BY o.id HAVING count(DISTINCT i.item_type)=2 LIMIT 1`)
+  ).rows[0]?.id;
+  expect(read.orders.find((order: { id: string }) => order.id === mixedId)?.items.length).toBe(2);
+  const menuResponse = (await handleBookingApi(
+    new Request("https://command.test/api/service/v1/dine-in/menu", { headers }),
+  ))!;
+  const menu = await menuResponse.json();
+  expect(menu.source).toBe("command_center");
+  expect(menu.items.length).toBeGreaterThanOrEqual(1);
 });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../ui/sheet";
 import {
   staffApi,
   useStaffRole,
@@ -64,6 +65,8 @@ export function OrdersScreen() {
       setReason("");
       void client.invalidateQueries({ queryKey: ["dining-orders"] });
       void client.invalidateQueries({ queryKey: ["dining-order"] });
+      void client.invalidateQueries({ queryKey: ["floor-folio"] });
+      void client.invalidateQueries({ queryKey: ["floor-operations"] });
     },
   });
   useEffect(() => {
@@ -170,14 +173,14 @@ export function OrdersScreen() {
           Загружаем заказы…
         </p>
       )}
-      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+      <div className="mt-5">
         <div className="space-y-5">
           {groups.map(([name, rows]) => (
             <section key={name}>
               <h2 className="mb-2 text-sm font-semibold text-slate-500">
                 {group ? `Стол ${name}` : name} · {rows.length}
               </h2>
-              <div className="space-y-2">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {rows.map((o) => (
                   <button
                     key={o.id}
@@ -200,13 +203,29 @@ export function OrdersScreen() {
                       </span>
                     </div>
                     <p className="mt-2 text-sm text-slate-500">
-                      {o.guestName ?? "Неавторизованный гость"} · {dateTime(o.acceptedAt)}
+                      {o.guestName ?? "Гость без аккаунта"} · {dateTime(o.acceptedAt)}
                     </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {o.zoneName} · {o.items.reduce((total, item) => total + item.quantity, 0)}{" "}
+                      поз.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      {o.items.some((item) => item.itemType === "REGULAR_MENU") && (
+                        <span className="rounded-full bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                          Основное меню
+                        </span>
+                      )}
+                      {o.items.some((item) => item.itemType !== "REGULAR_MENU") && (
+                        <span className="rounded-full bg-violet-50 px-2 py-1 text-xs text-violet-800">
+                          Биржа
+                        </span>
+                      )}
+                    </div>
                     <p className="mt-2 text-sm">
                       {o.items.map((i) => `${i.quantity} × ${i.name}`).join(", ")}
                     </p>
                     <p className="mt-3 flex justify-between font-semibold">
-                      <span>Принять через терминал</span>
+                      <span>{o.manualPaymentAt ? "Получение отмечено" : "К получению"}</span>
                       <span>{money(o.payableMinor)}</span>
                     </p>
                   </button>
@@ -243,180 +262,206 @@ export function OrdersScreen() {
             </p>
           )}
         </div>
-        <section aria-label="Карточка заказа">
-          {order ? (
-            <div className="rounded-2xl border bg-white p-5">
-              <div className="flex justify-between gap-3">
-                <div>
-                  <h2 className="text-2xl font-semibold">
-                    №{order.number} · Стол {order.tableCode}
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {order.zoneName} · {order.tableName}
-                  </p>
-                </div>
-                <button
-                  aria-label="Закрыть карточку"
-                  className={controlClass}
-                  onClick={() => setSelected(null)}
-                >
-                  ×
-                </button>
-              </div>
-              <p className="mt-4 font-medium">{order.guestName ?? "Неавторизованный гость"}</p>
-              {order.guestPhone && (
-                <a href={`tel:${order.guestPhone}`} className="text-sm text-slate-500">
-                  {order.guestPhone}
-                </a>
-              )}
-              <div className="mt-4 divide-y">
-                {order.items.map((i) => (
-                  <div key={i.id} className="py-3">
-                    <div className="flex justify-between gap-2 text-sm">
-                      <span>
-                        {i.quantity} × {i.name}
-                      </span>
-                      <strong>{money(i.totalMinor)}</strong>
-                    </div>
-                    <p className="mt-1 break-all text-xs text-slate-400">
-                      {money(i.unitPriceMinor)} за ед. · раунд {i.roundId}
+        <Sheet
+          open={!!selected}
+          onOpenChange={(open) => {
+            if (!open) setSelected(null);
+          }}
+        >
+          <SheetContent
+            side="right"
+            className="w-full overflow-y-auto px-3 pb-24 pt-12 sm:max-w-xl"
+          >
+            <SheetTitle>Карточка заказа</SheetTitle>
+            <SheetDescription>Стол, состав и серверный расчёт заказа.</SheetDescription>
+            {detail.isPending && (
+              <p role="status" className="py-5">
+                Загружаем заказ…
+              </p>
+            )}
+            {(detail.error || mutation.error) && (
+              <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-red-800">
+                {(detail.error ?? mutation.error)?.message}
+              </p>
+            )}
+            {order ? (
+              <div className="rounded-2xl border bg-white p-5">
+                <div className="flex justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-semibold">
+                      №{order.number} · Стол {order.tableCode}
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {order.zoneName} · {order.tableName}
                     </p>
                   </div>
-                ))}
-              </div>
-              <dl className="mt-3 space-y-2 border-t pt-4 text-sm">
-                {[
-                  ["Сумма позиций", order.subtotalMinor],
-                  ["Списано бонусов", order.discountMinor],
-                  ["Кэшбэк начислен", order.cashbackMinor],
-                ].map(([l, v]) => (
-                  <div key={l} className="flex justify-between">
-                    <dt>{l}</dt>
-                    <dd>{money(v)}</dd>
-                  </div>
-                ))}
-                <div className="flex justify-between rounded-xl bg-slate-900 p-4 text-base font-semibold text-white">
-                  <dt>Принять через Kaspi</dt>
-                  <dd>{money(order.payableMinor)}</dd>
+                  <button
+                    aria-label="Закрыть карточку"
+                    className={controlClass}
+                    onClick={() => setSelected(null)}
+                  >
+                    ×
+                  </button>
                 </div>
-              </dl>
-              <p className="mt-3 text-xs text-amber-800">
-                Пилот: заказ условно оплачен для бонусов. Банковского подтверждения нет. Примите
-                оплату через терминал.
-              </p>
-              <p className="mt-3 text-sm">
-                {order.manualPaymentAt
-                  ? `Сотрудник отметил оплату: ${dateTime(order.manualPaymentAt)}`
-                  : "Оплата сотрудником ещё не отмечена"}
-              </p>
-              {canWrite && order.status !== "cancelled" && (
-                <div className="mt-4 space-y-3">
-                  <div className="flex flex-wrap gap-2">
-                    {order.status in nextStatus && (
-                      <button
-                        disabled={mutation.isPending}
-                        className={controlClass}
-                        onClick={() =>
-                          change("status", {
-                            status: nextStatus[order.status as keyof typeof nextStatus],
-                          })
-                        }
-                      >
-                        {statusLabels[nextStatus[order.status as keyof typeof nextStatus]]}
-                      </button>
-                    )}
-                    {!order.manualPaymentAt && (
-                      <button
-                        disabled={mutation.isPending}
-                        className={controlClass}
-                        onClick={() => change("status", { manualPaymentReceived: true })}
-                      >
-                        Оплата принята вручную
-                      </button>
-                    )}
-                  </div>
-                  {role === "manager" && (
-                    <form
-                      className="flex flex-wrap gap-2 border-t pt-3"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        change("cancel", { reason }, "POST");
-                      }}
-                    >
-                      <input
-                        required
-                        minLength={3}
-                        maxLength={500}
-                        aria-label="Причина отмены"
-                        placeholder="Причина отмены"
-                        value={reason}
-                        onChange={(e) => setReason(e.target.value)}
-                        className={`${controlClass} min-w-0 grow`}
-                      />
-                      <button
-                        disabled={mutation.isPending || reason.trim().length < 3}
-                        className={`${controlClass} text-red-700`}
-                      >
-                        Отменить заказ
-                      </button>
-                    </form>
-                  )}
-                  {!order.guestId && (
-                    <div className="border-t pt-3">
-                      <label className="text-sm">
-                        Прикрепить гостя
-                        <input
-                          value={guestSearch}
-                          onChange={(e) => setGuestSearch(e.target.value)}
-                          placeholder="Имя или телефон, от 3 символов"
-                          className={`${controlClass} mt-2 w-full`}
-                        />
-                      </label>
-                      {guests.error && <p role="alert">{guests.error.message}</p>}
-                      {guestSearch.trim().length >= 3 &&
-                        guests.data?.guests.slice(0, 5).map((g) => (
-                          <button
-                            key={g.id}
-                            disabled={mutation.isPending}
-                            className="block min-h-11 text-left text-sm"
-                            onClick={() => change("guest", { guestId: g.id }, "POST")}
-                          >
-                            {g.name} · {g.phone}
-                          </button>
-                        ))}
-                      <p className="mt-2 text-xs text-slate-500">
-                        Кэшбэк задним числом не начисляется.
+                <p className="mt-4 font-medium">{order.guestName ?? "Гость без аккаунта"}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {dateTime(order.acceptedAt)} · {statusLabels[order.status]}
+                </p>
+                {order.guestPhone && (
+                  <a href={`tel:${order.guestPhone}`} className="text-sm text-slate-500">
+                    {order.guestPhone}
+                  </a>
+                )}
+                <div className="mt-4 divide-y">
+                  {order.items.map((i) => (
+                    <div key={i.id} className="py-3">
+                      <div className="flex justify-between gap-2 text-sm">
+                        <span>
+                          {i.quantity} × {i.name}
+                        </span>
+                        <strong>{money(i.totalMinor)}</strong>
+                      </div>
+                      <p className="mt-1 break-all text-xs text-slate-400">
+                        {money(i.unitPriceMinor)} за ед. ·{" "}
+                        {i.itemType === "REGULAR_MENU" ? "Основное меню" : "Биржа напитков"}
                       </p>
                     </div>
-                  )}
+                  ))}
                 </div>
-              )}
-              <h3 className="mt-6 font-semibold">История действий</h3>
-              <ol className="mt-3 space-y-3">
-                {order.events.map((e) => (
-                  <li key={e.id} className="border-l-2 pl-3 text-xs text-slate-500">
-                    <p>
-                      {statusLabels[e.type as keyof typeof statusLabels] ??
-                        {
-                          created: "Заказ создан",
-                          manual_payment_received: "Оплата принята вручную",
-                          guest_linked: "Гость прикреплён",
-                        }[e.type] ??
-                        e.type}{" "}
-                      · {e.actor}
-                    </p>
-                    <p>{dateTime(e.createdAt)}</p>
-                    {typeof e.details.reason === "string" && <p>{e.details.reason}</p>}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ) : (
-            <p className="rounded-2xl border border-dashed p-8 text-center text-sm text-slate-500">
-              Выберите заказ, чтобы увидеть состав и сумму к оплате.
-            </p>
-          )}
-        </section>
+                <dl className="mt-3 space-y-2 border-t pt-4 text-sm">
+                  {[
+                    ["Сумма позиций", order.subtotalMinor],
+                    ["Списано бонусов", order.discountMinor],
+                    ["Кэшбэк начислен", order.cashbackMinor],
+                  ].map(([l, v]) => (
+                    <div key={l} className="flex justify-between">
+                      <dt>{l}</dt>
+                      <dd>{money(v)}</dd>
+                    </div>
+                  ))}
+                  <div className="flex justify-between rounded-xl bg-slate-900 p-4 text-base font-semibold text-white">
+                    <dt>К получению</dt>
+                    <dd>{money(order.payableMinor)}</dd>
+                  </div>
+                </dl>
+                <p className="mt-3 text-xs text-amber-800">
+                  Пилот: заказ условно оплачен для бонусов. Банковского подтверждения нет. Примите
+                  оплату через терминал.
+                </p>
+                <p className="mt-3 text-sm">
+                  {order.manualPaymentAt
+                    ? `Сотрудник отметил оплату: ${dateTime(order.manualPaymentAt)}`
+                    : "Оплата сотрудником ещё не отмечена"}
+                </p>
+                {canWrite && order.status !== "cancelled" && (
+                  <div className="mt-4 space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                      {order.status in nextStatus && (
+                        <button
+                          disabled={mutation.isPending}
+                          className={controlClass}
+                          onClick={() =>
+                            change("status", {
+                              status: nextStatus[order.status as keyof typeof nextStatus],
+                            })
+                          }
+                        >
+                          {statusLabels[nextStatus[order.status as keyof typeof nextStatus]]}
+                        </button>
+                      )}
+                      {!order.manualPaymentAt && (
+                        <button
+                          disabled={mutation.isPending}
+                          className={controlClass}
+                          onClick={() => change("status", { manualPaymentReceived: true })}
+                        >
+                          Оплата принята вручную
+                        </button>
+                      )}
+                    </div>
+                    {role === "manager" && (
+                      <form
+                        className="flex flex-wrap gap-2 border-t pt-3"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          change("cancel", { reason }, "POST");
+                        }}
+                      >
+                        <input
+                          required
+                          minLength={3}
+                          maxLength={500}
+                          aria-label="Причина отмены"
+                          placeholder="Причина отмены"
+                          value={reason}
+                          onChange={(e) => setReason(e.target.value)}
+                          className={`${controlClass} min-w-0 grow`}
+                        />
+                        <button
+                          disabled={mutation.isPending || reason.trim().length < 3}
+                          className={`${controlClass} text-red-700`}
+                        >
+                          Отменить заказ
+                        </button>
+                      </form>
+                    )}
+                    {!order.guestId && (
+                      <div className="border-t pt-3">
+                        <label className="text-sm">
+                          Прикрепить гостя
+                          <input
+                            value={guestSearch}
+                            onChange={(e) => setGuestSearch(e.target.value)}
+                            placeholder="Имя или телефон, от 3 символов"
+                            className={`${controlClass} mt-2 w-full`}
+                          />
+                        </label>
+                        {guests.error && <p role="alert">{guests.error.message}</p>}
+                        {guestSearch.trim().length >= 3 &&
+                          guests.data?.guests.slice(0, 5).map((g) => (
+                            <button
+                              key={g.id}
+                              disabled={mutation.isPending}
+                              className="block min-h-11 text-left text-sm"
+                              onClick={() => change("guest", { guestId: g.id }, "POST")}
+                            >
+                              {g.name} · {g.phone}
+                            </button>
+                          ))}
+                        <p className="mt-2 text-xs text-slate-500">
+                          Кэшбэк задним числом не начисляется.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <h3 className="mt-6 font-semibold">История действий</h3>
+                <ol className="mt-3 space-y-3">
+                  {order.events.map((e) => (
+                    <li key={e.id} className="border-l-2 pl-3 text-xs text-slate-500">
+                      <p>
+                        {statusLabels[e.type as keyof typeof statusLabels] ??
+                          {
+                            created: "Заказ создан",
+                            manual_payment_received: "Оплата принята вручную",
+                            guest_linked: "Гость прикреплён",
+                          }[e.type] ??
+                          e.type}{" "}
+                        · {e.actor}
+                      </p>
+                      <p>{dateTime(e.createdAt)}</p>
+                      {typeof e.details.reason === "string" && <p>{e.details.reason}</p>}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ) : (
+              <p className="rounded-2xl border border-dashed p-8 text-center text-sm text-slate-500">
+                Выберите заказ, чтобы увидеть состав и сумму к оплате.
+              </p>
+            )}
+          </SheetContent>
+        </Sheet>
       </div>
     </div>
   );

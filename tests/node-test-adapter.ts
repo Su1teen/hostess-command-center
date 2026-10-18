@@ -52,7 +52,8 @@ export function expect(actual: unknown, negate = false): Matchers {
       };
     },
     toBe(expected: unknown) {
-      check(Object.is(actual, expected));
+      if (negate) assert.notEqual(actual, expected);
+      else assert.equal(actual, expected);
     },
     toEqual(expected: unknown) {
       if (negate) assert.notDeepEqual(actual, expected);

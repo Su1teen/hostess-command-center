@@ -1,332 +1,354 @@
-import { ChefHat, Package, Plus, Search, TrendingDown, TrendingUp, Utensils } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { DEMO_MENU, type DemoMenuItem } from "../../lib/demoData";
-import { formatKzt } from "../../lib/formatters/money";
+import { ChefHat, Plus, Search, Utensils } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { money, staffApi, useStaffRole, controlClass } from "../../lib/dine-in-client";
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../ui/sheet";
 import { AlcoholCatalog } from "../catalog/AlcoholCatalog";
 import { XoxoDrinkCatalog } from "./XoxoDrinkCatalog";
 
-const categories = [
-  "Все блюда",
-  "Стейки",
-  "Рыба",
-  "Закуски",
-  "Бургеры",
-  "Супы",
-  "Десерты",
-] as const;
-type MenuCategory = (typeof categories)[number];
+type MenuItem = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  imageUrl: string | null;
+  portion: string;
+  allergens: string[];
+  priceMinor: string;
+  isAvailable: boolean;
+  published: boolean;
+  sortOrder: number;
+  version: number;
+};
+type Draft = Omit<MenuItem, "id" | "priceMinor" | "version" | "allergens"> & {
+  id?: string;
+  price: string;
+  allergensText: string;
+  version?: number;
+};
+const empty: Draft = {
+  name: "",
+  description: "",
+  category: "Кухня",
+  imageUrl: null,
+  portion: "",
+  allergensText: "",
+  price: "",
+  isAvailable: true,
+  published: false,
+  sortOrder: 0,
+};
 
 export function MenuScreen() {
-  const [items, setItems] = useState(DEMO_MENU);
-  const [editingKitchen, setEditingKitchen] = useState<DemoMenuItem | null>(null);
-  const [kitchenPrice, setKitchenPrice] = useState("");
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("xoxo:kitchen:demo:v1");
-      if (saved) {
-        const parsed: unknown = JSON.parse(saved);
-        if (Array.isArray(parsed)) setItems(parsed as DemoMenuItem[]);
-      }
-    } catch {
-      /* Keep the seed catalog. */
-    }
-  }, []);
-  const updateItems = (next: DemoMenuItem[]) => {
-    setItems(next);
-    try {
-      localStorage.setItem("xoxo:kitchen:demo:v1", JSON.stringify(next));
-    } catch {
-      /* Still editable this session. */
-    }
-  };
-  const [category, setCategory] = useState<MenuCategory>("Все блюда");
-  const [search, setSearch] = useState("");
-  const [showAdd, setShowAdd] = useState(false);
-  const [draft, setDraft] = useState({
-    name: "",
-    price: "",
-    stock: "",
-    category: "Стейки" as Exclude<MenuCategory, "Все блюда">,
+  const role = useStaffRole(),
+    client = useQueryClient();
+  const canEdit = role === "manager";
+  const [section, setSection] = useState<"menu" | "exchange">("menu");
+  const [search, setSearch] = useState(""),
+    [category, setCategory] = useState("Все блюда"),
+    [draft, setDraft] = useState<Draft | null>(null);
+  const query = useQuery({
+    queryKey: ["regular-menu-staff"],
+    queryFn: ({ signal }) => staffApi<{ items: MenuItem[] }>("/dine-in/menu-items", { signal }),
+    refetchInterval: 15000,
   });
-
+  const items = useMemo(() => query.data?.items ?? [], [query.data?.items]);
+  const categories = ["Все блюда", ...Array.from(new Set(items.map((item) => item.category)))];
   const filtered = useMemo(
     () =>
-      items.filter((item) => {
-        const matchesCategory = category === "Все блюда" || item.category === category;
-        return (
-          matchesCategory && item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())
-        );
-      }),
-    [category, items, search],
+      items.filter(
+        (item) =>
+          (category === "Все блюда" || category === item.category) &&
+          `${item.name} ${item.description}`
+            .toLocaleLowerCase()
+            .includes(search.toLocaleLowerCase()),
+      ),
+    [items, category, search],
   );
-  const activeCount = items.filter((item) => item.active).length;
-  const lowStock = items.filter((item) => item.stock < 8).length;
-
-  const addItem = () => {
-    const price = Number(draft.price);
-    const stock = Number(draft.stock);
-    if (!draft.name.trim() || !Number.isFinite(price) || price <= 0) return;
-    const newItem: DemoMenuItem = {
-      id: `local-${Date.now()}`,
-      name: draft.name.trim(),
-      category: draft.category,
-      price,
-      sold: 0,
-      stock: Number.isFinite(stock) ? stock : 0,
-      trend: 0,
-      active: true,
-    };
-    updateItems([newItem, ...items]);
-    setDraft({ name: "", price: "", stock: "", category: "Стейки" });
-    setShowAdd(false);
-  };
-
+  const save = useMutation({
+    mutationFn: async (value: Draft) => {
+      if (!/^\d+(\.\d{1,2})?$/.test(value.price))
+        throw new Error("Введите цену в тенге, до двух знаков после запятой");
+      const [whole, fraction = ""] = value.price.split(".");
+      const priceMinor = Number(BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0")));
+      if (priceMinor > 1_000_000_000) throw new Error("Цена превышает допустимую сумму");
+      return staffApi(`/dine-in/menu-items${value.id ? `/${value.id}` : ""}`, {
+        method: value.id ? "PATCH" : "POST",
+        body: JSON.stringify({
+          name: value.name,
+          description: value.description,
+          category: value.category,
+          imageUrl: value.imageUrl?.trim() || null,
+          portion: value.portion,
+          priceMinor,
+          allergens: value.allergensText
+            .split(",")
+            .map((x) => x.trim())
+            .filter(Boolean),
+          isAvailable: value.isAvailable,
+          published: value.published,
+          sortOrder: value.sortOrder,
+          ...(value.version ? { version: value.version } : {}),
+        }),
+      });
+    },
+    onSuccess: () => {
+      setDraft(null);
+      void client.invalidateQueries({ queryKey: ["regular-menu-staff"] });
+    },
+  });
+  function edit(item?: MenuItem) {
+    save.reset();
+    setDraft(
+      item
+        ? {
+            ...item,
+            price: (Number(item.priceMinor) / 100).toFixed(2),
+            allergensText: item.allergens.join(", "),
+          }
+        : { ...empty },
+    );
+  }
   return (
-    <div className="space-y-5 px-4 pb-32 pt-6">
+    <div className="space-y-5 px-4 pb-32 pt-6 sm:px-6">
       <header className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-            Каталог
+            XOXO · каталог
           </p>
           <h1 className="mt-1 text-3xl font-bold tracking-tight">Меню</h1>
-          <p className="mt-1 text-sm text-slate-500">Барная карта и кухня спортбара</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setShowAdd((value) => !value)}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-lg shadow-slate-900/10 active:scale-95"
-          aria-label="Добавить блюдо"
-        >
-          <Plus size={20} />
-        </button>
-      </header>
-
-      <section className="overflow-hidden rounded-[2rem] bg-slate-900 p-5 text-white shadow-lg shadow-slate-900/10">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-300">
-              Барная карта
-            </p>
-            <h2 className="mt-1 text-2xl font-bold">Напитки из биржи</h2>
-            <p className="mt-2 max-w-[260px] text-sm leading-5 text-slate-300">
-              Фото, текущая цена и настройки каждого напитка доступны внутри каталога.
-            </p>
-          </div>
-          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-300/15 text-amber-200">
-            <Utensils size={22} />
-          </span>
-        </div>
-      </section>
-
-      <AlcoholCatalog />
-      <XoxoDrinkCatalog />
-
-      <section className="grid grid-cols-3 gap-2">
-        <div className="rounded-2xl bg-white p-3 shadow-sm">
-          <p className="text-[11px] text-slate-500">Блюд</p>
-          <p className="mt-1 text-xl font-bold">{items.length}</p>
-        </div>
-        <div className="rounded-2xl bg-white p-3 shadow-sm">
-          <p className="text-[11px] text-slate-500">Активны</p>
-          <p className="mt-1 text-xl font-bold text-emerald-700">{activeCount}</p>
-        </div>
-        <div className="rounded-2xl bg-amber-50 p-3">
-          <p className="text-[11px] text-amber-700">Мало на складе</p>
-          <p className="mt-1 text-xl font-bold text-amber-950">{lowStock}</p>
-        </div>
-      </section>
-
-      {showAdd && (
-        <section className="space-y-3 rounded-3xl bg-white p-4 shadow-sm">
-          <div>
-            <h2 className="font-bold">Новое блюдо</h2>
-            <p className="mt-1 text-xs text-slate-500">Позиция добавится в локальное меню</p>
-          </div>
-          <input
-            value={draft.name}
-            onChange={(event) => setDraft((value) => ({ ...value, name: event.target.value }))}
-            placeholder="Название блюда"
-            className="field"
-          />
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              value={draft.price}
-              onChange={(event) => setDraft((value) => ({ ...value, price: event.target.value }))}
-              placeholder="Цена, KZT"
-              inputMode="numeric"
-              className="field"
-            />
-            <input
-              value={draft.stock}
-              onChange={(event) => setDraft((value) => ({ ...value, stock: event.target.value }))}
-              placeholder="Остаток"
-              inputMode="numeric"
-              className="field"
-            />
-          </div>
-          <select
-            value={draft.category}
-            onChange={(event) =>
-              setDraft((value) => ({
-                ...value,
-                category: event.target.value as typeof draft.category,
-              }))
-            }
-            className="field"
-          >
-            {categories.slice(1).map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={addItem}
-            className="w-full rounded-2xl bg-slate-900 py-3.5 font-semibold text-white active:scale-[.99]"
-          >
-            Сохранить блюдо
-          </button>
-        </section>
-      )}
-
-      <section>
-        <div className="mb-3 flex items-center gap-2">
-          <ChefHat size={19} className="text-slate-500" />
-          <div>
-            <h2 className="text-lg font-bold">Кухня</h2>
-            <p className="text-xs text-slate-500">Стейки, рыба, закуски и горячие блюда</p>
-          </div>
-        </div>
-        <label className="flex items-center gap-2 rounded-2xl bg-white px-3.5 py-3 shadow-sm">
-          <Search size={18} className="text-slate-400" />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Поиск по меню"
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
-          />
-        </label>
-      </section>
-
-      <div className="flex gap-2 overflow-x-auto pb-1 wheel-scroll">
-        {categories.map((item) => (
-          <button
-            type="button"
-            key={item}
-            onClick={() => setCategory(item)}
-            className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold ${category === item ? "bg-slate-900 text-white" : "bg-white text-slate-600"}`}
-          >
-            {item}
-          </button>
-        ))}
-      </div>
-
-      <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {filtered.map((item) => (
-          <article
-            key={item.id}
-            className={`flex min-h-20 w-full items-center gap-3 rounded-3xl bg-white p-3 text-left shadow-sm transition-transform active:scale-[.99] ${item.active ? "" : "opacity-60"}`}
-          >
-            <span
-              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${item.stock < 8 ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}
-            >
-              <Package size={20} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-semibold">{item.name}</span>
-              <span className="mt-0.5 block text-xs text-slate-500">
-                {item.category} · {item.stock ? `${item.stock} порций в запасе` : "Нет на складе"}
-              </span>
-              <span className="mt-1 flex items-center gap-1 text-[11px] font-semibold">
-                {item.trend >= 0 ? (
-                  <TrendingUp size={12} className="text-emerald-600" />
-                ) : (
-                  <TrendingDown size={12} className="text-rose-600" />
-                )}
-                <span className={item.trend >= 0 ? "text-emerald-700" : "text-rose-700"}>
-                  {item.trend >= 0 ? "+" : ""}
-                  {item.trend}% за неделю
-                </span>
-              </span>
-            </span>
-            <span className="shrink-0 text-right">
-              <span className="block text-base font-bold tabular-nums">
-                {formatKzt(item.price)}
-              </span>
-              <span
-                className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${item.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}
-              >
-                {item.active ? "Активно" : "Скрыто"}
-              </span>
-              <span className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingKitchen(item);
-                    setKitchenPrice(String(item.price));
-                  }}
-                  className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-700"
-                >
-                  Цена
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateItems(
-                      items.map((row) =>
-                        row.id === item.id ? { ...row, active: !row.active } : row,
-                      ),
-                    )
-                  }
-                  className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-700"
-                >
-                  {item.active ? "Скрыть" : "Показать"}
-                </button>
-              </span>
-            </span>
-          </article>
-        ))}
-        {!filtered.length && (
-          <p className="rounded-3xl bg-white p-8 text-center text-sm text-slate-500">
-            Блюда не найдены
+          <p className="mt-2 text-sm text-slate-500">
+            Опубликованные блюда доступны гостям за всеми столами.
           </p>
-        )}
-      </section>
-      {editingKitchen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 sm:items-center"
-          onClick={() => setEditingKitchen(null)}
-        >
-          <div
-            className="w-full max-w-md space-y-3 rounded-t-[2rem] bg-white p-5 pb-8 sm:rounded-[2rem]"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 className="text-xl font-bold">{editingKitchen.name}</h3>
-            <p className="text-sm text-slate-500">Цена кухни · демо</p>
-            <input
-              className="field"
-              inputMode="numeric"
-              value={kitchenPrice}
-              onChange={(event) => setKitchenPrice(event.target.value)}
-            />
-            <button
-              type="button"
-              onClick={() => {
-                const price = Number(kitchenPrice);
-                if (!Number.isFinite(price) || price <= 0) return;
-                updateItems(
-                  items.map((row) => (row.id === editingKitchen.id ? { ...row, price } : row)),
-                );
-                setEditingKitchen(null);
-              }}
-              className="w-full rounded-2xl bg-slate-900 py-3.5 font-semibold text-white"
-            >
-              Сохранить цену
-            </button>
-          </div>
         </div>
+        {canEdit && section === "menu" && (
+          <button
+            onClick={() => edit()}
+            aria-label="Добавить блюдо"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white"
+          >
+            <Plus size={22} />
+          </button>
+        )}
+      </header>
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          onClick={() => setSection("menu")}
+          aria-pressed={section === "menu"}
+          className={`min-h-20 rounded-2xl border p-4 text-left ${section === "menu" ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white"}`}
+        >
+          <ChefHat size={20} />
+          <span className="mt-2 block font-semibold">Основное меню</span>
+        </button>
+        <button
+          onClick={() => setSection("exchange")}
+          aria-pressed={section === "exchange"}
+          className={`min-h-20 rounded-2xl border p-4 text-left ${section === "exchange" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white"}`}
+        >
+          <Utensils size={20} />
+          <span className="mt-2 block font-semibold">Биржа напитков</span>
+        </button>
+      </div>
+      {section === "exchange" ? (
+        <>
+          <AlcoholCatalog />
+          <XoxoDrinkCatalog />
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              ["Позиций", items.length],
+              ["Опубликовано", items.filter((i) => i.published).length],
+              ["В стоп-листе", items.filter((i) => i.published && !i.isAvailable).length],
+            ].map(([label, count]) => (
+              <div key={label} className="rounded-2xl bg-white p-4">
+                <p className="text-xs text-slate-500">{label}</p>
+                <p className="mt-1 text-2xl font-bold">{count}</p>
+              </div>
+            ))}
+          </div>
+          <label className="flex min-h-12 items-center gap-2 rounded-2xl bg-white px-4">
+            <Search size={18} className="text-slate-400" />
+            <input
+              aria-label="Поиск по меню"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Название или описание"
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+            />
+          </label>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {categories.map((value) => (
+              <button
+                key={value}
+                onClick={() => setCategory(value)}
+                className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-semibold ${value === category ? "bg-slate-900 text-white" : "bg-white text-slate-600"}`}
+              >
+                {value}
+              </button>
+            ))}
+          </div>
+          {query.error && (
+            <p role="alert" className="rounded-2xl bg-red-50 p-4 text-red-800">
+              {query.error.message}
+              <button onClick={() => void query.refetch()} className="ml-3 underline">
+                Повторить
+              </button>
+            </p>
+          )}
+          {query.isPending && (
+            <p role="status" className="p-6 text-slate-500">
+              Загружаем меню…
+            </p>
+          )}
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {filtered.map((item) => (
+              <article
+                key={item.id}
+                className="overflow-hidden rounded-3xl border border-slate-100 bg-white"
+              >
+                <div className="relative h-40 bg-amber-50">
+                  {item.imageUrl ? (
+                    <img
+                      src={item.imageUrl}
+                      alt={item.name}
+                      loading="lazy"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-amber-700/30">
+                      <ChefHat size={48} />
+                    </div>
+                  )}
+                  <span
+                    className={`absolute bottom-3 left-3 rounded-full px-3 py-1 text-xs font-semibold ${!item.published ? "bg-slate-100 text-slate-600" : item.isAvailable ? "bg-emerald-100 text-emerald-900" : "bg-rose-100 text-rose-900"}`}
+                  >
+                    {!item.published ? "Черновик" : item.isAvailable ? "В меню" : "Стоп-лист"}
+                  </span>
+                </div>
+                <div className="p-4">
+                  <p className="text-xs text-slate-500">
+                    {item.category}
+                    {item.portion ? ` · ${item.portion}` : ""}
+                  </p>
+                  <h2 className="mt-1 text-lg font-bold">{item.name}</h2>
+                  <p className="mt-1 line-clamp-2 min-h-10 text-sm text-slate-500">
+                    {item.description || "Описание пока не добавлено"}
+                  </p>
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <strong className="tabular-nums">{money(item.priceMinor)}</strong>
+                    {canEdit && (
+                      <button className={controlClass} onClick={() => edit(item)}>
+                        Изменить
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </section>
+          {!query.isPending && !query.error && !filtered.length && (
+            <div className="rounded-3xl border border-dashed p-8 text-center">
+              <ChefHat className="mx-auto text-amber-600" size={32} />
+              <h2 className="mt-3 text-lg font-semibold">
+                {items.length ? "Ничего не найдено" : "Добавьте настоящее меню XOXO"}
+              </h2>
+              <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+                {items.length
+                  ? "Попробуйте другое название или категорию."
+                  : "Блюда, фотографии и цены сохраняются на сервере. Гости увидят только опубликованные позиции."}
+              </p>
+              {canEdit && !items.length && (
+                <button className={`${controlClass} mt-5`} onClick={() => edit()}>
+                  Добавить первое блюдо
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
+      <Sheet
+        open={!!draft}
+        onOpenChange={(open) => {
+          if (!open) setDraft(null);
+        }}
+      >
+        <SheetContent side="right" className="w-full overflow-y-auto pb-24 pt-12 sm:max-w-xl">
+          <SheetTitle>{draft?.id ? "Редактировать блюдо" : "Новое блюдо"}</SheetTitle>
+          <SheetDescription>
+            Сохраните карточку и включите публикацию, когда информация проверена.
+          </SheetDescription>
+          {draft && (
+            <form
+              className="mt-5 space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                save.mutate(draft);
+              }}
+            >
+              {(
+                [
+                  ["name", "Название"],
+                  ["category", "Категория"],
+                  ["price", "Цена, ₸"],
+                  ["portion", "Порция / объём"],
+                  ["imageUrl", "Ссылка на фото (HTTPS)"],
+                  ["allergensText", "Аллергены, через запятую"],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="block text-sm font-medium">
+                  {label}
+                  <input
+                    className={`${controlClass} mt-1 w-full`}
+                    required={["name", "category", "price"].includes(key)}
+                    inputMode={key === "price" ? "decimal" : undefined}
+                    type={key === "imageUrl" ? "url" : "text"}
+                    value={draft[key] ?? ""}
+                    onChange={(event) => setDraft({ ...draft, [key]: event.target.value })}
+                  />
+                </label>
+              ))}
+              <label className="block text-sm font-medium">
+                Описание / состав
+                <textarea
+                  rows={4}
+                  className={`${controlClass} mt-1 w-full py-3`}
+                  value={draft.description}
+                  onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+                />
+              </label>
+              <label className="flex min-h-12 items-center gap-3 rounded-xl bg-slate-50 p-3">
+                <input
+                  type="checkbox"
+                  checked={draft.isAvailable}
+                  onChange={(event) => setDraft({ ...draft, isAvailable: event.target.checked })}
+                />
+                Доступно к заказу
+              </label>
+              <label className="flex min-h-12 items-center gap-3 rounded-xl bg-amber-50 p-3">
+                <input
+                  type="checkbox"
+                  checked={draft.published}
+                  onChange={(event) => setDraft({ ...draft, published: event.target.checked })}
+                />
+                Опубликовать для гостей
+              </label>
+              {save.error && (
+                <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">
+                  {save.error.message}
+                </p>
+              )}
+              <button
+                disabled={save.isPending}
+                className="min-h-12 w-full rounded-2xl bg-slate-900 px-4 font-semibold text-white disabled:opacity-50"
+              >
+                {save.isPending ? "Сохраняем…" : "Сохранить блюдо"}
+              </button>
+            </form>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

@@ -250,7 +250,7 @@ export async function floorSnapshot(venueId: string, raw: unknown): Promise<Floo
      SELECT q.resource_id FROM table_qr_codes q WHERE q.venue_id=$1
       AND COALESCE(b.table_ids,ARRAY[b.table_id]) && hostess_physical_alias_codes(q.resource_id)) p ON true
      WHERE (b.starts_at<$3 AND COALESCE(b.ends_at,b.starts_at+interval '2 hours')>$2)
-        OR (b.starts_at>=$4 AND b.starts_at<$4::timestamptz+interval '24 hours') ORDER BY b.starts_at`,
+        OR (COALESCE(b.ends_at,b.starts_at+interval '2 hours')>$4 AND b.starts_at<$4::timestamptz+interval '24 hours') ORDER BY b.starts_at`,
       [venueId, day.startsAt, day.endsAt, at],
     );
     // Add physical id separately because normalized reservation resource can be a linked VIP room.
@@ -258,7 +258,7 @@ export async function floorSnapshot(venueId: string, raw: unknown): Promise<Floo
       `SELECT b.id,q.resource_id FROM command_center_reservations b JOIN table_qr_codes q ON q.venue_id=$1
       AND COALESCE(b.table_ids,ARRAY[b.table_id]) && hostess_physical_alias_codes(q.resource_id)
       WHERE b.starts_at<$3 AND COALESCE(b.ends_at,b.starts_at+interval '2 hours')>$2
-        OR (q.venue_id=$1 AND b.starts_at>=$4 AND b.starts_at<$4::timestamptz+interval '24 hours')`,
+        OR (q.venue_id=$1 AND COALESCE(b.ends_at,b.starts_at+interval '2 hours')>$4 AND b.starts_at<$4::timestamptz+interval '24 hours')`,
       [venueId, day.startsAt, day.endsAt, at],
     );
     const sessions = await client.query(

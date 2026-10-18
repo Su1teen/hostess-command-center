@@ -8,7 +8,11 @@ export const quoteInput = z
     items: z
       .array(
         z
-          .object({ productId: z.string().uuid(), quantity: z.number().int().min(1).max(20) })
+          .object({
+            productId: z.string().uuid(),
+            quantity: z.number().int().min(1).max(20),
+            itemType: z.enum(["EXCHANGE", "REGULAR_MENU"]).optional(),
+          })
           .strict(),
       )
       .min(1)
@@ -18,7 +22,9 @@ export const quoteInput = z
   })
   .strict()
   .refine(
-    (v) => new Set(v.items.map((i) => i.productId)).size === v.items.length,
+    (v) =>
+      new Set(v.items.map((i) => `${i.itemType ?? "EXCHANGE"}:${i.productId}`)).size ===
+      v.items.length,
     "Duplicate products",
   )
   .refine(
@@ -103,6 +109,14 @@ export const snapshotSchema = z.object({
       price: z.union([z.number().finite().nonnegative(), z.string()]),
       currency: z.literal("KZT"),
       isAvailable: z.boolean(),
+      slug: z.string().optional(),
+      category: z.string().optional(),
+      imageUrl: z.string().nullable().optional(),
+      volumeMl: z.number().nullable().optional(),
+      originalPrice: z.number().nullable().optional(),
+      previousPrice: z.number().nullable().optional(),
+      minPrice: z.number().nullable().optional(),
+      changePercent: z.number().nullable().optional(),
     }),
   ),
 });
@@ -113,7 +127,9 @@ export type Line = {
   quantity: number;
   unitPriceMinor: number;
   totalMinor: number;
-  roundId: string;
+  roundId: string | null;
+  itemType?: "EXCHANGE" | "REGULAR_MENU";
+  menuVersion?: number;
 };
 export function priceLines(
   snapshot: Snapshot,
@@ -129,6 +145,7 @@ export function priceLines(
     const unitPriceMinor = toMinor(p.price);
     return {
       ...item,
+      itemType: "EXCHANGE" as const,
       name: p.name,
       unitPriceMinor,
       totalMinor: unitPriceMinor * item.quantity,

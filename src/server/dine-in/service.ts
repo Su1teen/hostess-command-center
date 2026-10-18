@@ -15,6 +15,7 @@ import {
 } from "./domain";
 import { earn, redeem, walletView, loyaltyLock, reverseLoyalty } from "./loyalty";
 import { acquireDiningSession, floorLock } from "../floor/lifecycle";
+import { regularPriceLines, validateRegularQuote } from "./menu";
 
 export type Owner = { guestId: string | null; hash: string };
 export function exchangeOrigin() {
@@ -72,12 +73,20 @@ export async function venue(client: Pick<PoolClient, "query">, slug: string) {
 export async function createQuote(owner: Owner, raw: unknown) {
   const input = quoteInput.parse(raw);
   const table = await findTable(pool, input.qrToken);
-  if (table.slug !== "xoxo")
+  const exchangeItems = input.items.filter((item) => (item.itemType ?? "EXCHANGE") === "EXCHANGE");
+  const regularItems = input.items.filter((item) => item.itemType === "REGULAR_MENU");
+  if (table.slug !== "xoxo" && exchangeItems.length)
     throw new ApiError(422, "UNSUPPORTED_VENUE", "Меню заведения пока недоступно");
-  const priced = priceLines(await snapshot(), input.items);
+  const exchange = exchangeItems.length ? priceLines(await snapshot(), exchangeItems) : null;
   return transaction(async (client) => {
     await loyaltyLock(client);
     const table = await findTable(client, input.qrToken, true);
+    const regular = await regularPriceLines(client, table.venue_id, regularItems);
+    const priced = {
+      lines: [...(exchange?.lines ?? []), ...regular],
+      expiresAt: exchange?.expiresAt ?? new Date(Date.now() + 120_000).toISOString(),
+    };
+    const roundId = exchange?.lines[0]?.roundId ?? null;
     const program = (
       await client.query("SELECT * FROM loyalty_programs WHERE venue_id=$1", [table.venue_id])
     ).rows[0];
@@ -105,7 +114,7 @@ export async function createQuote(owner: Owner, raw: unknown) {
         owner.guestId,
         owner.hash,
         JSON.stringify(priced.lines),
-        priced.lines[0].roundId,
+        roundId,
         totals.subtotalMinor,
         totals.discountMinor,
         totals.payableMinor,
@@ -116,7 +125,7 @@ export async function createQuote(owner: Owner, raw: unknown) {
     return {
       ...result.rows[0],
       currency: "KZT",
-      roundId: priced.lines[0].roundId,
+      roundId,
       table: { resourceId: table.resource_id, code: table.code },
       items: priced.lines,
       ...totals,
@@ -129,7 +138,7 @@ export async function orderDetail(client: Pick<PoolClient, "query">, id: string,
       `SELECT o.id,o.number::text,o.venue_id AS "venueId",v.slug AS "venueCode",o.guest_id AS "guestId",r.code AS "tableCode",r.name AS "tableName",z.name AS "zoneName",
     g.name AS "guestName",g.phone AS "guestPhone",o.status,o.payment_status AS "paymentStatus",o.manual_payment_at AS "manualPaymentAt",o.accepted_at AS "acceptedAt",
     (SELECT l.expires_at FROM loyalty_lots l WHERE l.order_id=o.id) AS "cashbackExpiresAt",o.subtotal_minor::text AS "subtotalMinor",o.discount_minor::text AS "discountMinor",o.payable_minor::text AS "payableMinor",o.cashback_minor::text AS "cashbackMinor",
-    (SELECT COALESCE(jsonb_agg(jsonb_build_object('id',i.id,'productId',i.exchange_product_id,'name',i.name,'quantity',i.quantity,'unitPriceMinor',i.unit_price_minor::text,'totalMinor',i.total_minor::text,'roundId',i.round_id) ORDER BY i.id),'[]') FROM dine_in_order_items i WHERE i.order_id=o.id) AS items,
+    (SELECT COALESCE(jsonb_agg(jsonb_build_object('id',i.id,'productId',COALESCE(i.exchange_product_id,i.menu_item_id::text),'itemType',i.item_type,'menuVersion',i.menu_version,'name',i.name,'quantity',i.quantity,'unitPriceMinor',i.unit_price_minor::text,'totalMinor',i.total_minor::text,'roundId',i.round_id) ORDER BY i.id),'[]') FROM dine_in_order_items i WHERE i.order_id=o.id) AS items,
     (SELECT COALESCE(jsonb_agg(jsonb_build_object('id',e.id,'type',e.type,'actor',e.actor,'details',e.details,'createdAt',e.created_at) ORDER BY e.created_at,e.id),'[]') FROM dine_in_order_events e WHERE e.order_id=o.id) AS events
     FROM dine_in_orders o JOIN hostess_venues v ON v.id=o.venue_id JOIN venue_resources r ON r.id=o.table_resource_id JOIN venue_zones z ON z.id=r.zone_id
     LEFT JOIN hostess_guests g ON g.id=o.guest_id WHERE o.id=$1 AND o.venue_id=$2`,
@@ -165,7 +174,7 @@ export async function enqueue(
     SELECT o.venue_id,o.id,i.id,$2,jsonb_build_object('orderId',o.id,'orderItemId',i.id,'exchangeProductId',i.exchange_product_id,
       'roundId',i.round_id,'quantity',i.quantity,'unitPrice',i.unit_price_minor/100.0,'unitPriceMinor',i.unit_price_minor::text,'currency','KZT',
       'occurredAt',CASE WHEN $2='ORDER_ACCEPTED' THEN o.accepted_at ELSE clock_timestamp() END,'venueCode',v.slug,'eventType',$2::text)
-    FROM dine_in_orders o JOIN dine_in_order_items i ON i.order_id=o.id JOIN hostess_venues v ON v.id=o.venue_id WHERE o.id=$1
+    FROM dine_in_orders o JOIN dine_in_order_items i ON i.order_id=o.id JOIN hostess_venues v ON v.id=o.venue_id WHERE o.id=$1 AND i.item_type='EXCHANGE'
     ON CONFLICT(order_item_id,event_type) DO NOTHING`,
     [order.id, type],
   );
@@ -229,6 +238,7 @@ export async function checkout(owner: Owner, raw: unknown) {
         "TABLE_DISABLED",
         "QR-код отключён или перевыпущен. Отсканируйте его заново",
       );
+    await validateRegularQuote(client, qr.venue_id, quote.lines as Line[]);
     const diningSessionId = await acquireDiningSession(client, qr.venue_id, qr.resource_id);
     const receiptToken = randomToken();
     const order = (
@@ -257,17 +267,21 @@ export async function checkout(owner: Owner, raw: unknown) {
     }
     for (const line of quote.lines as Line[])
       await client.query(
-        `INSERT INTO dine_in_order_items(venue_id,order_id,exchange_product_id,round_id,name,quantity,unit_price_minor,total_minor)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+        `INSERT INTO dine_in_order_items(venue_id,order_id,exchange_product_id,round_id,name,quantity,unit_price_minor,total_minor,item_type,source,menu_item_id,menu_version)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [
           qr.venue_id,
           order.id,
-          line.productId,
+          line.itemType === "REGULAR_MENU" ? null : line.productId,
           line.roundId,
           line.name,
           line.quantity,
           line.unitPriceMinor,
           line.totalMinor,
+          line.itemType ?? "EXCHANGE",
+          line.itemType === "REGULAR_MENU" ? "regular_menu" : "exchange",
+          line.itemType === "REGULAR_MENU" ? line.productId : null,
+          line.menuVersion ?? null,
         ],
       );
     // Validate using wall clock after all locks and writes; never accept a stale round.

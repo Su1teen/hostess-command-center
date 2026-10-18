@@ -16,7 +16,7 @@ export function FloorFolio({ sessionId }: { sessionId: string }) {
     queryKey: ["floor-folio", sessionId],
     queryFn: ({ signal }) =>
       staffApi<{ folio: Folio }>(`/floor/sessions/${sessionId}/folio`, { signal }),
-    refetchInterval: 15_000,
+    refetchInterval: 4_000,
   });
   const folio = query.data?.folio;
   if (query.isPending)
@@ -80,6 +80,7 @@ export function FloorFolio({ sessionId }: { sessionId: string }) {
           <p className="px-3 pt-3 text-xs text-slate-500">
             {formatDateTimeAlmaty(order.acceptedAt)} · {statusLabels[order.status]}
           </p>
+          <p className="px-3 pt-2 text-sm font-medium">{order.guestName ?? "Гость без аккаунта"}</p>
           <ul className="divide-y px-3">
             {order.items.map((item) => (
               <li key={item.id} className="py-3 text-sm">
@@ -90,7 +91,8 @@ export function FloorFolio({ sessionId }: { sessionId: string }) {
                   <strong className="shrink-0">{money(item.totalMinor)}</strong>
                 </div>
                 <p className="mt-1 text-xs text-slate-500">
-                  {money(item.unitPriceMinor)} за единицу · {statusLabels[order.status]}
+                  {money(item.unitPriceMinor)} за единицу ·{" "}
+                  {item.itemType === "REGULAR_MENU" ? "Основное меню" : "Биржа"}
                 </p>
               </li>
             ))}
@@ -98,6 +100,9 @@ export function FloorFolio({ sessionId }: { sessionId: string }) {
           <div className="border-t bg-slate-50 px-3 py-3 text-xs">
             <p>
               К оплате: <strong>{money(order.payableMinor)}</strong>
+            </p>
+            <p className="mt-1 text-slate-500">
+              Списано бонусов: {money(order.discountMinor)} · Кэшбэк: {money(order.cashbackMinor)}
             </p>
             <p className="mt-1 text-slate-500">
               {order.manualPaymentAt
