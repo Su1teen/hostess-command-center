@@ -1,3 +1,5 @@
+import { regularPriceLines } from "../dine-in/menu";
+import { toMinor } from "../dine-in/domain";
 import { getById } from "../repositories/reservations.repository";
 import { handleDiningApi, guestDiningSummary } from "../dine-in/api";
 import { handleShiftRead } from "../dine-in/shift";
@@ -185,7 +187,7 @@ async function reservationList(
     (SELECT z.name FROM command_center_reservation_resources rr JOIN venue_resources vr ON vr.id=rr.resource_id JOIN venue_zones z ON z.id=vr.zone_id WHERE rr.reservation_id=r.id) AS "zoneName",
     r.deposit_status AS "depositStatus",r.deposit_amount AS "depositAmount",r.iiko_sync_status AS "iikoSyncStatus",
     COALESCE((SELECT jsonb_agg(jsonb_build_object('productId',p.product_id,'productName',p.product_name,
-      'quantity',p.quantity,'unitPrice',p.unit_price,'total',p.total,'status',p.preorder_status,'roundId',p.round_id))
+      'itemType',COALESCE(to_jsonb(p)->>'item_type','EXCHANGE'),'quantity',p.quantity,'unitPrice',p.unit_price,'total',p.total,'status',p.preorder_status,'roundId',p.round_id))
       FROM command_center_reservation_preorders p WHERE p.reservation_id=r.id),'[]') AS preorders
     FROM command_center_reservations r WHERE r.guest_id=$1 AND ($2::uuid IS NULL OR r.id=$2)
       AND ($3::timestamptz IS NULL OR (r.created_at,r.id) < ($3::timestamptz,$4::uuid)) ORDER BY r.created_at DESC,r.id DESC LIMIT 200`,
@@ -618,27 +620,45 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
           guestId: uuid.optional(),
           items: z
             .array(
-              z.object({ productId: uuid, quantity: z.number().int().min(1).max(20) }).strict(),
+              z
+                .object({
+                  productId: uuid,
+                  quantity: z.number().int().min(1).max(20),
+                  itemType: z.enum(["EXCHANGE", "REGULAR_MENU"]).optional(),
+                })
+                .strict(),
             )
             .min(1)
             .max(30),
         })
         .strict()
         .parse(data);
-      if (new Set(input.items.map((i) => i.productId)).size !== input.items.length)
+      if (
+        new Set(input.items.map((i) => `${i.itemType ?? "EXCHANGE"}:${i.productId}`)).size !==
+        input.items.length
+      )
         throw new ApiError(422, "DUPLICATE_PRODUCT", "Повторяющиеся позиции");
+      const exchangeItems = input.items.filter((i) => i.itemType !== "REGULAR_MENU");
       const origin = process.env.EXCHANGE_API_ORIGIN;
-      if (!origin) throw new ApiError(503, "EXCHANGE_UNAVAILABLE", "Биржа недоступна");
-      const response = await fetch(`${origin.replace(/\/$/, "")}/api/v1/public/snapshot`, {
-        redirect: "error",
-        signal: AbortSignal.timeout(8000),
-      });
+      if (!origin && exchangeItems.length)
+        throw new ApiError(503, "EXCHANGE_UNAVAILABLE", "Биржа недоступна");
+      const response = exchangeItems.length
+        ? await fetch(`${origin!.replace(/\/$/, "")}/api/v1/public/snapshot`, {
+            redirect: "error",
+            signal: AbortSignal.timeout(8000),
+          })
+        : Response.json({
+            status: "ok",
+            generatedAt: new Date().toISOString(),
+            currentRound: { id: null, endsAt: new Date(Date.now() + 120000).toISOString() },
+            products: [],
+          });
       if (!response.ok) throw new ApiError(503, "EXCHANGE_UNAVAILABLE", "Биржа недоступна");
       const snapshot = z
         .object({
           generatedAt: z.string().datetime(),
           status: z.literal("ok"),
-          currentRound: z.object({ id: z.string(), endsAt: z.string().datetime() }),
+          currentRound: z.object({ id: z.string().nullable(), endsAt: z.string().datetime() }),
           products: z.array(
             z.object({
               id: uuid,
@@ -656,17 +676,32 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
         Math.abs(Date.now() - Date.parse(snapshot.generatedAt)) > 60_000
       )
         throw new ApiError(409, "REQUOTE", "Цены обновляются. Повторите запрос");
-      const lines = input.items.map((item) => {
+      const lines = exchangeItems.map((item) => {
         const p = snapshot.products.find((p) => p.id === item.productId && p.isAvailable);
         if (!p) throw new ApiError(409, "PRODUCT_UNAVAILABLE", "Позиция недоступна");
         return {
           productId: p.id,
           productName: p.name,
           quantity: item.quantity,
-          unitPrice: Math.round(p.price * 100) / 100,
-          total: (Math.round(p.price * 100) * item.quantity) / 100,
+          unitPrice: toMinor(p.price) / 100,
+          total: (toMinor(p.price) * item.quantity) / 100,
         };
       });
+      const regularItems = input.items.filter((i) => i.itemType === "REGULAR_MENU");
+      if (regularItems.length) {
+        const v = (await pool.query("SELECT id FROM hostess_venues WHERE slug='xoxo'")).rows[0];
+        const regular = await regularPriceLines(pool, v.id, regularItems);
+        lines.push(
+          ...regular.map((l) => ({
+            productId: l.productId,
+            productName: l.name,
+            quantity: l.quantity,
+            unitPrice: l.unitPriceMinor / 100,
+            total: l.totalMinor / 100,
+            itemType: "REGULAR_MENU" as const,
+          })),
+        );
+      }
       const quote = await pool.query(
         `INSERT INTO hostess_quotes(guest_id,round_id,lines,expires_at)
         VALUES($1,$2,$3,$4) RETURNING id,expires_at AS "expiresAt"`,
@@ -797,7 +832,22 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
           [id, hold.id],
         );
         if (quote) {
-          for (const line of quote.lines)
+          for (const line of quote.lines) {
+            if (line.itemType === "REGULAR_MENU") {
+              await client.query(
+                `INSERT INTO command_center_reservation_preorders(reservation_id,product_id,product_name,quantity,unit_price,total,quote_id,round_id,item_type) VALUES($1,$2,$3,$4,$5,$6,$7,NULL,'REGULAR_MENU')`,
+                [
+                  id,
+                  line.productId,
+                  line.productName,
+                  line.quantity,
+                  line.unitPrice,
+                  line.total,
+                  quote.id,
+                ],
+              );
+              continue;
+            }
             await client.query(
               `INSERT INTO command_center_reservation_preorders
             (reservation_id,product_id,product_name,quantity,unit_price,total,quote_id,round_id)
@@ -813,6 +863,7 @@ export async function handleBookingApi(request: Request): Promise<Response | nul
                 quote.round_id,
               ],
             );
+          }
           await client.query("UPDATE hostess_quotes SET consumed_at=now() WHERE id=$1", [quote.id]);
         }
         await client.query("UPDATE hostess_holds SET consumed_at=now() WHERE id=$1", [hold.id]);

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { openStaffOrder } from "../orders/ServiceOperations";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays, Clock3, ExternalLink, Users } from "lucide-react";
 import { staffApi, controlClass } from "../../lib/dine-in-client";
@@ -277,6 +278,14 @@ export function FloorTableDrawer({
           </section>
         )}
         <div className="grid grid-cols-2 gap-2">
+          {canWrite && current?.seatedAt && live && (
+            <button
+              className={`${controlClass} col-span-2`}
+              onClick={() => openStaffOrder(current.id)}
+            >
+              Создать заказ / код гостю
+            </button>
+          )}
           {bookable && (
             <button
               type="button"

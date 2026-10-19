@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SuppliersRouteImport } from './routes/suppliers'
+import { Route as ShiftRouteImport } from './routes/shift'
 import { Route as SalesRouteImport } from './routes/sales'
 import { Route as ReservationsRouteImport } from './routes/reservations'
 import { Route as OrdersRouteImport } from './routes/orders'
@@ -23,6 +24,11 @@ import { Route as TablesQrRouteImport } from './routes/tables.qr'
 const SuppliersRoute = SuppliersRouteImport.update({
   id: '/suppliers',
   path: '/suppliers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ShiftRoute = ShiftRouteImport.update({
+  id: '/shift',
+  path: '/shift',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SalesRoute = SalesRouteImport.update({
@@ -80,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/orders': typeof OrdersRoute
   '/reservations': typeof ReservationsRoute
   '/sales': typeof SalesRoute
+  '/shift': typeof ShiftRoute
   '/suppliers': typeof SuppliersRoute
   '/tables/qr': typeof TablesQrRoute
 }
@@ -92,6 +99,7 @@ export interface FileRoutesByTo {
   '/orders': typeof OrdersRoute
   '/reservations': typeof ReservationsRoute
   '/sales': typeof SalesRoute
+  '/shift': typeof ShiftRoute
   '/suppliers': typeof SuppliersRoute
   '/tables/qr': typeof TablesQrRoute
 }
@@ -105,6 +113,7 @@ export interface FileRoutesById {
   '/orders': typeof OrdersRoute
   '/reservations': typeof ReservationsRoute
   '/sales': typeof SalesRoute
+  '/shift': typeof ShiftRoute
   '/suppliers': typeof SuppliersRoute
   '/tables/qr': typeof TablesQrRoute
 }
@@ -119,6 +128,7 @@ export interface FileRouteTypes {
     | '/orders'
     | '/reservations'
     | '/sales'
+    | '/shift'
     | '/suppliers'
     | '/tables/qr'
   fileRoutesByTo: FileRoutesByTo
@@ -131,6 +141,7 @@ export interface FileRouteTypes {
     | '/orders'
     | '/reservations'
     | '/sales'
+    | '/shift'
     | '/suppliers'
     | '/tables/qr'
   id:
@@ -143,6 +154,7 @@ export interface FileRouteTypes {
     | '/orders'
     | '/reservations'
     | '/sales'
+    | '/shift'
     | '/suppliers'
     | '/tables/qr'
   fileRoutesById: FileRoutesById
@@ -156,6 +168,7 @@ export interface RootRouteChildren {
   OrdersRoute: typeof OrdersRoute
   ReservationsRoute: typeof ReservationsRoute
   SalesRoute: typeof SalesRoute
+  ShiftRoute: typeof ShiftRoute
   SuppliersRoute: typeof SuppliersRoute
   TablesQrRoute: typeof TablesQrRoute
 }
@@ -167,6 +180,13 @@ declare module '@tanstack/react-router' {
       path: '/suppliers'
       fullPath: '/suppliers'
       preLoaderRoute: typeof SuppliersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/shift': {
+      id: '/shift'
+      path: '/shift'
+      fullPath: '/shift'
+      preLoaderRoute: typeof ShiftRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sales': {
@@ -244,6 +264,7 @@ const rootRouteChildren: RootRouteChildren = {
   OrdersRoute: OrdersRoute,
   ReservationsRoute: ReservationsRoute,
   SalesRoute: SalesRoute,
+  ShiftRoute: ShiftRoute,
   SuppliersRoute: SuppliersRoute,
   TablesQrRoute: TablesQrRoute,
 }

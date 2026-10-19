@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { accessTable, claimAccess, issueAccess } from "./access";
+import { bookingRequests, requestBooking, resolveBookingRequest } from "./booking-requests";
 import { guestQuote, guestOrder, pageCursor } from "./presentation";
 import { pool } from "../db/pool";
 import {
@@ -19,6 +21,7 @@ import {
   venue,
   orderDetail,
   changeStatus,
+  verifiedVisitGuest,
   type Owner,
 } from "./service";
 import { normalizePhone, statusNames, toMinor } from "./domain";
@@ -194,6 +197,24 @@ export async function handleDiningApi(request: Request): Promise<Response | null
       if (serviceActor(request) !== "bff")
         throw new ApiError(403, "BFF_REQUIRED", "Маршрут доступен через Hostess");
       await rateLimit(`dining:${request.headers.get("x-hostess-client-id") ?? "unknown"}`, 120);
+      if (path === "/dine-in/booking-requests") {
+        const context = await getOwner(request);
+        if (!context.owner.guestId)
+          throw new ApiError(401, "SESSION_REQUIRED", "Укажите имя и телефон для заявки");
+        const v = await venue(pool, "xoxo");
+        if (method === "GET")
+          return json({ requests: await bookingRequests(v.id, context.owner.guestId) });
+        if (method === "POST")
+          return json(await requestBooking(v.id, context.owner.guestId, await body(request)), 201);
+      }
+      if (path === "/dine-in/access/claim" && method === "POST") {
+        await rateLimit(
+          `dining-code-client:${request.headers.get("x-hostess-client-id") ?? "unknown"}`,
+          10,
+        );
+        const context = await getOwner(request, true);
+        return json(await claimAccess(context.owner, await body(request)), 200, context.setCookie);
+      }
       if (path === "/occupancy" && method === "GET") {
         const slugs = z
           .array(z.string().regex(/^[a-z0-9-]{1,80}$/))
@@ -208,7 +229,10 @@ export async function handleDiningApi(request: Request): Promise<Response | null
       }
       const tableMatch = /^\/dine-in\/tables\/([A-Za-z0-9_-]{43,64})$/.exec(path);
       if (tableMatch && method === "GET") {
-        const t = await findTable(pool, tableMatch[1]);
+        const token = tableMatch[1].startsWith("visit_")
+          ? (await accessTable(tableMatch[1], (await getOwner(request)).owner)).token
+          : tableMatch[1];
+        const t = await findTable(pool, token);
         return json({
           venueCode: t.slug,
           venueName: t.display_name,
@@ -326,6 +350,130 @@ export async function handleDiningApi(request: Request): Promise<Response | null
           (method === "PATCH" && path.startsWith("/tables/"));
       const staff = await staffAuth(request, write, isSensitive),
         v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
+      if (path === "/dine-in/booking-requests" && method === "GET")
+        return json({ requests: await bookingRequests(v.id) });
+      const requestMatch = /^\/dine-in\/booking-requests\/([a-f0-9-]{36})$/.exec(path);
+      if (requestMatch && method === "PATCH") {
+        if (staff.role !== "manager")
+          throw new ApiError(403, "FORBIDDEN", "Заявки подтверждает менеджер");
+        return json(
+          await resolveBookingRequest(
+            v.id,
+            staff.staff_id!,
+            uuid.parse(requestMatch[1]),
+            await body(request),
+          ),
+        );
+      }
+      if (path === "/dine-in/access" && method === "POST")
+        return json(await issueAccess(v.id, staff.staff_id!, await body(request)), 201);
+      if (path === "/dine-in/operations" && method === "GET") {
+        const rows = (
+          await pool.query(
+            `SELECT id FROM dine_in_orders WHERE venue_id=$1 AND status<>'cancelled'
+           AND (status<>'closed' OR manual_payment_at IS NULL)
+           ORDER BY (status='new') DESC,accepted_at,id LIMIT 201`,
+            [v.id],
+          )
+        ).rows;
+        const counts = (
+          await pool.query(
+            `SELECT count(*) FILTER(WHERE status='new')::int AS "newCount",
+           count(*) FILTER(WHERE status NOT IN('new','closed','cancelled'))::int AS "workingCount",
+           count(*) FILTER(WHERE status<>'cancelled' AND manual_payment_at IS NULL)::int AS "unpaidCount"
+           FROM dine_in_orders WHERE venue_id=$1`,
+            [v.id],
+          )
+        ).rows[0];
+        return json({
+          orders: await Promise.all(rows.slice(0, 200).map((r) => orderDetail(pool, r.id, v.id))),
+          ...counts,
+          hasMore: rows.length > 200,
+          asOf: new Date().toISOString(),
+        });
+      }
+      if (path === "/dine-in/catalog" && method === "GET") {
+        // Regular menu remains usable while the exchange is offline.
+        const exchange = await snapshot().catch(() => null);
+        return json({ regular: await menuCatalog(v.id, v.slug), exchange });
+      }
+      if (path === "/dine-in/staff-quotes" && method === "POST") {
+        const input = z
+          .object({
+            sessionId: uuid,
+            items: z.array(z.unknown()).min(1).max(30),
+            useVisitGuest: z.boolean().default(false),
+            redeemMinor: z.number().int().min(0).max(100_000_000_000).default(0),
+          })
+          .strict()
+          .parse(await body(request));
+        const table = (
+          await pool.query(
+            `SELECT q.token FROM dining_sessions s JOIN table_qr_codes q ON q.resource_id=s.resource_id AND q.venue_id=s.venue_id
+           WHERE s.id=$1 AND s.venue_id=$2 AND s.closed_at IS NULL AND s.seated_at IS NOT NULL`,
+            [input.sessionId, v.id],
+          )
+        ).rows[0];
+        if (!table)
+          throw new ApiError(409, "SESSION_CHANGED", "Сначала подтвердите посадку на карте зала");
+        const actor = `staff:${staff.staff_id}`;
+        const guest = input.useVisitGuest
+          ? await verifiedVisitGuest(pool, v.id, input.sessionId)
+          : null;
+        if (input.useVisitGuest && !guest)
+          throw new ApiError(
+            409,
+            "OWNER_CHANGED",
+            "У визита нет проверенного гостя из прибывшей брони",
+          );
+        return json(
+          await createQuote(
+            { guestId: guest?.id ?? null, hash: hash(actor) },
+            {
+              qrToken: table.token,
+              items: input.items,
+              redeemMinor: input.redeemMinor,
+            },
+            { actor, sessionId: input.sessionId },
+          ),
+          201,
+        );
+      }
+      if (path === "/dine-in/staff-orders" && method === "POST") {
+        const actor = `staff:${staff.staff_id}`;
+        const input = z
+          .object({ quoteId: uuid, idempotencyKey: z.string().min(16).max(128) })
+          .strict()
+          .parse(await body(request));
+        const quote = (
+          await pool.query(
+            "SELECT guest_id FROM dine_in_quotes WHERE id=$1 AND venue_id=$2 AND owner_hash=$3 AND staff_actor=$4",
+            [input.quoteId, v.id, hash(actor), actor],
+          )
+        ).rows[0];
+        if (!quote) throw new ApiError(404, "QUOTE_NOT_FOUND", "Расчёт не найден");
+        const result = await checkout({ guestId: quote.guest_id, hash: hash(actor) }, input, actor);
+        return json(
+          { order: result.order, replayed: result.replayed },
+          result.replayed ? 200 : 201,
+        );
+      }
+      if (path === "/dine-in/staff-context" && method === "GET") {
+        const guest = await verifiedVisitGuest(
+          pool,
+          v.id,
+          uuid.parse(url.searchParams.get("sessionId")),
+        );
+        return json({
+          guest,
+          wallet: guest
+            ? await transaction(async (client) => {
+                await loyaltyLock(client);
+                return walletView(client, v.id, guest.id);
+              })
+            : null,
+        });
+      }
       if (path === "/dine-in/menu-items" && method === "GET")
         return json(await menuCatalog(v.id, v.slug, true));
       if (path === "/dine-in/menu-items" && method === "POST")
