@@ -69,17 +69,27 @@ export async function snapshot() {
     throw new ApiError(503, "EXCHANGE_UNAVAILABLE", "Биржа временно недоступна. Попробуйте снова");
   }
 }
-export async function findTable(client: Pick<PoolClient, "query">, token: string, lock = false) {
+export async function findTable(
+  client: Pick<PoolClient, "query">,
+  token: string,
+  lock = false,
+  staff = false,
+) {
   const row = (
     await client.query(
       `SELECT q.id,q.venue_id,q.resource_id,q.generation,q.enabled,r.code,r.name,r.zone_id,z.name AS zone_name,v.slug,v.display_name,v.active,r.status,z.is_active
     FROM table_qr_codes q JOIN venue_resources r ON r.id=q.resource_id JOIN venue_zones z ON z.id=r.zone_id JOIN hostess_venues v ON v.id=q.venue_id
-    WHERE q.token=$1 ${lock ? "FOR UPDATE OF q" : ""}`,
+    WHERE q.token=$1 OR ('web_'||r.id::text)=$1 ${lock ? "FOR UPDATE OF q" : ""}`,
       [token],
     )
   ).rows[0];
   if (!row) throw new ApiError(404, "TABLE_NOT_FOUND", "QR-код не найден или перевыпущен");
-  if (!row.enabled || !row.active || row.status !== "active" || !row.is_active)
+  if (
+    (!row.enabled && !staff && !token.startsWith("web_")) ||
+    !row.active ||
+    row.status !== "active" ||
+    !row.is_active
+  )
     throw new ApiError(409, "TABLE_DISABLED", "Заказы по этому QR временно отключены");
   return row;
 }
@@ -92,14 +102,15 @@ export async function venue(client: Pick<PoolClient, "query">, slug: string) {
 export async function createQuote(
   owner: Owner,
   raw: unknown,
-  staffContext?: { actor: string; sessionId: string },
+  staffContext?: { actor: string; sessionId: string; preorderIds?: string[] },
 ) {
   const input = quoteInput.parse(raw);
+  const webOrder = input.qrToken.startsWith("web_");
   const access = input.qrToken.startsWith("visit_")
     ? await accessTable(input.qrToken, owner)
     : null;
   if (access) input.qrToken = access.token;
-  const table = await findTable(pool, input.qrToken);
+  const table = await findTable(pool, input.qrToken, false, !!staffContext);
   const exchangeItems = input.items.filter((item) => (item.itemType ?? "EXCHANGE") === "EXCHANGE");
   const regularItems = input.items.filter((item) => item.itemType === "REGULAR_MENU");
   if (table.slug !== "xoxo" && exchangeItems.length)
@@ -108,19 +119,49 @@ export async function createQuote(
   return transaction(async (client) => {
     await loyaltyLock(client);
     await floorLock(client);
-    const table = await findTable(client, input.qrToken, true);
-    const contextSessionId = staffContext?.sessionId ?? access?.session_id ?? null;
+    const table = await findTable(client, input.qrToken, true, !!staffContext);
+    const contextSessionId =
+      staffContext?.sessionId ??
+      access?.session_id ??
+      (webOrder ? await acquireDiningSession(client, table.venue_id, table.resource_id) : null);
     if (
       contextSessionId &&
       !(
         await client.query(
-          "SELECT id FROM dining_sessions WHERE id=$1 AND venue_id=$2 AND resource_id=$3 AND seated_at IS NOT NULL AND closed_at IS NULL",
-          [contextSessionId, table.venue_id, table.resource_id],
+          "SELECT id FROM dining_sessions WHERE id=$1 AND venue_id=$2 AND resource_id=$3 AND ($4 OR seated_at IS NOT NULL) AND closed_at IS NULL",
+          [contextSessionId, table.venue_id, table.resource_id, webOrder],
         )
       ).rowCount
     )
       throw new ApiError(409, "SESSION_CHANGED", "Визит завершён или посадка не подтверждена");
     const regular = await regularPriceLines(client, table.venue_id, regularItems);
+    const preorderIds = staffContext?.preorderIds ?? [];
+    if (preorderIds.length) {
+      const planned = (
+        await client.query(
+          `SELECT p.id,p.product_id,p.item_type,p.quantity FROM command_center_reservation_preorders p
+         JOIN dining_sessions s ON s.reservation_id=p.reservation_id WHERE s.id=$1
+         AND p.id=ANY($2::uuid[]) AND p.preorder_status='pending' FOR UPDATE OF p`,
+          [contextSessionId, preorderIds],
+        )
+      ).rows;
+      if (planned.length !== preorderIds.length)
+        throw new ApiError(
+          409,
+          "PREORDER_CHANGED",
+          "Предзаказ уже оформлен или изменён. Обновите визит",
+        );
+      const quantities = new Map<string, number>();
+      for (const p of planned) {
+        const key = `${p.item_type}:${p.product_id}`;
+        quantities.set(key, (quantities.get(key) ?? 0) + p.quantity);
+      }
+      for (const [key, quantity] of quantities) {
+        const item = input.items.find((i) => `${i.itemType ?? "EXCHANGE"}:${i.productId}` === key);
+        if (!item || item.quantity < quantity)
+          throw new ApiError(422, "PREORDER_MISMATCH", "В корзине не хватает позиций предзаказа");
+      }
+    }
     const priced = {
       lines: [...(exchange?.lines ?? []), ...regular],
       expiresAt: exchange?.expiresAt ?? new Date(Date.now() + 120_000).toISOString(),
@@ -144,8 +185,8 @@ export async function createQuote(
     );
     if (!owner.guestId) totals.cashbackMinor = 0;
     const result = await client.query(
-      `INSERT INTO dine_in_quotes(venue_id,qr_id,qr_generation,guest_id,owner_hash,lines,round_id,subtotal_minor,discount_minor,payable_minor,cashback_minor,expires_at,context_session_id,staff_actor,access_grant_id)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id,expires_at AS "expiresAt"`,
+      `INSERT INTO dine_in_quotes(venue_id,qr_id,qr_generation,guest_id,owner_hash,lines,round_id,subtotal_minor,discount_minor,payable_minor,cashback_minor,expires_at,context_session_id,staff_actor,access_grant_id,order_source,preorder_ids)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id,expires_at AS "expiresAt"`,
       [
         table.venue_id,
         table.id,
@@ -162,6 +203,8 @@ export async function createQuote(
         contextSessionId,
         staffContext?.actor ?? null,
         access?.grant_id ?? null,
+        staffContext ? "staff" : access ? "table_code" : webOrder ? "web_app" : "qr",
+        preorderIds,
       ],
     );
     return {
@@ -265,8 +308,8 @@ export async function checkout(owner: Owner, raw: unknown, staffActor?: string) 
       quote.context_session_id &&
       !(
         await client.query(
-          `SELECT id FROM dining_sessions WHERE id=$1 AND venue_id=$2 AND seated_at IS NOT NULL AND closed_at IS NULL`,
-          [quote.context_session_id, quote.venue_id],
+          `SELECT id FROM dining_sessions WHERE id=$1 AND venue_id=$2 AND ($3 OR seated_at IS NOT NULL) AND closed_at IS NULL`,
+          [quote.context_session_id, quote.venue_id, quote.order_source === "web_app"],
         )
       ).rowCount
     )
@@ -299,7 +342,8 @@ export async function checkout(owner: Owner, raw: unknown, staffActor?: string) 
       )
     ).rows[0];
     if (
-      !qr?.enabled ||
+      !qr ||
+      (!qr.enabled && quote.order_source !== "web_app" && !staffActor) ||
       !qr.active ||
       qr.status !== "active" ||
       !qr.is_active ||
@@ -311,6 +355,14 @@ export async function checkout(owner: Owner, raw: unknown, staffActor?: string) 
         "QR-код отключён или перевыпущен. Отсканируйте его заново",
       );
     await validateRegularQuote(client, qr.venue_id, quote.lines as Line[]);
+    if (quote.preorder_ids.length) {
+      const pending = await client.query(
+        "SELECT id FROM command_center_reservation_preorders WHERE id=ANY($1::uuid[]) AND preorder_status='pending' FOR UPDATE",
+        [quote.preorder_ids],
+      );
+      if (pending.rowCount !== quote.preorder_ids.length)
+        throw new ApiError(409, "PREORDER_CHANGED", "Другой сотрудник уже оформил предзаказ");
+    }
     const diningSessionId = await acquireDiningSession(client, qr.venue_id, qr.resource_id);
     const receiptToken = randomToken();
     const order = (
@@ -337,6 +389,11 @@ export async function checkout(owner: Owner, raw: unknown, staffActor?: string) 
       await redeem(client, qr.venue_id, owner.guestId, order.id, Number(quote.discount_minor));
       await earn(client, qr.venue_id, owner.guestId, order.id, Number(quote.cashback_minor));
     }
+    if (quote.preorder_ids.length)
+      await client.query(
+        "UPDATE command_center_reservation_preorders SET preorder_status='ordered',execution_order_id=$2 WHERE id=ANY($1::uuid[])",
+        [quote.preorder_ids, order.id],
+      );
     for (const line of quote.lines as Line[])
       await client.query(
         `INSERT INTO dine_in_order_items(venue_id,order_id,exchange_product_id,round_id,name,quantity,unit_price_minor,total_minor,item_type,source,menu_item_id,menu_version)
@@ -369,7 +426,7 @@ export async function checkout(owner: Owner, raw: unknown, staffActor?: string) 
       staffActor ?? (owner.guestId ? `guest:${owner.guestId}` : "anonymous"),
       "created",
       {
-        source: staffActor ? "staff" : quote.access_grant_id ? "table_code" : "qr",
+        source: staffActor ? "staff" : quote.access_grant_id ? "table_code" : quote.order_source,
       },
     );
     await enqueue(client, order, "ORDER_ACCEPTED");
@@ -388,6 +445,7 @@ export async function changeStatus(
   cancelReason?: string,
   manualPayment?: boolean,
   guestId?: string,
+  cancellationRole: string = "manager",
 ) {
   return transaction(async (client) => {
     await loyaltyLock(client);
@@ -402,6 +460,12 @@ export async function changeStatus(
     const actor = `staff:${staffId}`;
     if (cancelReason) {
       if (order.status === "cancelled") return orderDetail(client, id, venueId);
+      if (cancellationRole !== "manager" && (order.status !== "new" || order.manual_payment_at))
+        throw new ApiError(
+          403,
+          "MANAGER_REQUIRED",
+          "После принятия заказа или отметки оплаты отмену выполняет менеджер",
+        );
       await reverseLoyalty(client, venueId, id);
       await client.query(
         "UPDATE dine_in_orders SET status='cancelled',updated_at=now() WHERE id=$1",

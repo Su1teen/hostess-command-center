@@ -155,7 +155,7 @@ test("atomic registry save keeps QR active independently and records audit witho
   const saved = result.tables.find((r) => r.resourceId === t.resourceId)!;
   assert.equal(saved.url, t.url);
   assert.equal(saved.enabled, true);
-  assert.equal(saved.bookable, false);
+  assert.equal(saved.bookable, true);
   assert.equal(saved.name, "У окна");
   assert.equal(saved.zoneId, zones.second_hall);
   assert.equal(saved.version, t.version + 1);
@@ -172,25 +172,23 @@ test("atomic registry save keeps QR active independently and records audit witho
   );
 });
 
-test("unconfirmed booking/capacity and cross-venue target validation roll back every edited field", async () => {
+test("pending mapping and unknown capacity are operational; invalid capacity still rolls back", async () => {
   const t = await table("02");
-  await assert.rejects(
-    saveRegistry(
-      venueId,
-      t.resourceId,
-      input(t, { name: "Must not save", enabled: false, bookable: true }),
-      manager,
-    ),
+  await saveRegistry(
+    venueId,
+    t.resourceId,
+    input(t, { name: "Operational pending", enabled: true, bookable: true }),
+    manager,
   );
   const unchanged = await table("02");
-  assert.equal(unchanged.name, t.name);
+  assert.equal(unchanged.name, "Operational pending");
   assert.equal(unchanged.enabled, t.enabled);
-  assert.equal(unchanged.version, t.version);
+  assert.equal(unchanged.version, t.version + 1);
   await assert.rejects(
     saveRegistry(
       venueId,
       t.resourceId,
-      input(t, {
+      input(unchanged, {
         relationship: "independent",
         verified: true,
         verificationNote: "Owner survey",
@@ -272,7 +270,10 @@ test("confirmed VIP mapping uses original booking room and one capacity with ali
     null,
   );
   assert.equal(availability.resources.find((r) => r.id === vip.id)!.available, false);
-  assert.equal(availability.resources.find((r) => r.id === saved.resourceId)!.bookable, false);
+  assert.equal(
+    availability.resources.some((r) => r.id === saved.resourceId),
+    false,
+  );
   await assert.rejects(
     saveRegistry(
       venueId,

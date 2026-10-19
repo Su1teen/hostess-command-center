@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import * as Dropdown from "@radix-ui/react-dropdown-menu";
+import { UserRound, LogOut } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 export function StaffGate({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -104,30 +106,67 @@ export function StaffGate({ children }: { children: ReactNode }) {
   if (staff)
     return (
       <>
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-2 text-xs text-slate-500">
-          <span>
-            {staff.id} ·{" "}
-            {{ manager: "Менеджер", operator: "Сотрудник", viewer: "Просмотр" }[staff.role] ??
-              staff.role}
-          </span>
-          <button
-            className="min-h-11 px-3"
-            onClick={() => {
-              void fetch("/api/staff/v1/logout", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: "{}",
-              }).then((response) => {
-                if (response.ok) {
-                  queryClient.clear();
-                  location.reload();
-                }
-              });
-            }}
-          >
-            Выйти
-          </button>
-        </div>
+        <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-3 lg:ml-52">
+          <div>
+            <strong className="text-sm">XOXO</strong>
+            <p className="mt-1 text-xs text-slate-500">
+              {new Intl.DateTimeFormat("ru-RU", {
+                timeZone: "Asia/Almaty",
+                day: "numeric",
+                month: "long",
+              }).format(new Date())}
+            </p>
+          </div>
+          <Dropdown.Root>
+            <Dropdown.Trigger
+              aria-label="Меню сотрудника"
+              className="flex min-h-11 items-center gap-2 rounded-full border border-slate-200 px-3 text-sm"
+            >
+              <UserRound size={18} />
+              {{ manager: "Менеджер", operator: "Сотрудник", viewer: "Просмотр" }[staff.role] ??
+                staff.role}
+            </Dropdown.Trigger>
+            <Dropdown.Portal>
+              <Dropdown.Content
+                align="end"
+                sideOffset={8}
+                className="z-[90] w-64 rounded-2xl border bg-white p-2 shadow-xl"
+              >
+                <div className="break-all border-b p-3 text-xs text-slate-500">
+                  Учётная запись сотрудника
+                  <br />
+                  {staff.id}
+                </div>
+                <Dropdown.Item
+                  className="flex min-h-12 cursor-pointer items-center rounded-xl px-3 text-sm outline-none focus:bg-slate-100"
+                  onSelect={() =>
+                    window.dispatchEvent(new CustomEvent("hostess:toggle-service-sound"))
+                  }
+                >
+                  Переключить звук уведомлений
+                </Dropdown.Item>
+                <Dropdown.Item
+                  className="flex min-h-12 cursor-pointer items-center gap-2 rounded-xl px-3 text-sm outline-none focus:bg-slate-100"
+                  onClick={() => {
+                    void fetch("/api/staff/v1/logout", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: "{}",
+                    }).then((response) => {
+                      if (response.ok) {
+                        queryClient.clear();
+                        location.reload();
+                      }
+                    });
+                  }}
+                >
+                  <LogOut size={16} />
+                  Выйти из аккаунта
+                </Dropdown.Item>
+              </Dropdown.Content>
+            </Dropdown.Portal>
+          </Dropdown.Root>
+        </header>
         {children}
         <Dialog.Root open={expired}>
           <Dialog.Portal>

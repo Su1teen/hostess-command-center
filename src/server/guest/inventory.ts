@@ -77,6 +77,9 @@ export async function listVenueAvailability(
        LEFT JOIN venue_resources r ON r.zone_id=z.id
        LEFT JOIN venue_layout l ON l.resource_id=r.id
        WHERE z.venue_code='xoxo' AND z.is_active
+         AND (EXISTS(SELECT 1 FROM table_qr_codes q WHERE q.resource_id=r.id)
+           OR EXISTS(SELECT 1 FROM venue_resource_mappings m WHERE m.linked_resource_id=r.id AND m.verified_at IS NOT NULL))
+         AND NOT EXISTS(SELECT 1 FROM venue_resource_mappings m WHERE m.resource_id=r.id AND m.linked_resource_id IS NOT NULL AND m.verified_at IS NOT NULL)
        ORDER BY z.display_order,r.code`,
     ),
     db.query(
@@ -130,9 +133,9 @@ export async function listVenueAvailability(
     }
     if (!zone) continue;
     if (!row.id) continue;
-    const bookable = row.is_reservable && row.status === "active" && row.capacity !== null;
+    const bookable = row.is_reservable && row.status === "active";
     const occupied = physicalBusy.has(row.code);
-    const fitsGuestCount = guests === null || (row.capacity !== null && row.capacity >= guests);
+    const fitsGuestCount = guests === null || row.capacity === null || row.capacity >= guests;
     const resource: VenueAvailabilityResource = {
       id: row.id,
       zoneId: row.zone_id,
@@ -151,7 +154,7 @@ export async function listVenueAvailability(
           ? "legacy_mapping"
           : "occupied"
         : !bookable
-          ? "not_verified"
+          ? "disabled"
           : !fitsGuestCount
             ? "capacity"
             : null,
@@ -193,7 +196,9 @@ export async function selectReservableResource(
      FROM venue_resources r JOIN venue_zones z ON z.id=r.zone_id
      LEFT JOIN venue_layout l ON l.resource_id=r.id
      WHERE r.venue_code='xoxo' AND z.is_active AND r.is_reservable AND r.status='active'
-       AND r.capacity >= $1 AND ($2::uuid IS NULL OR r.id=$2)
+       AND (r.capacity IS NULL OR r.capacity >= $1) AND ($2::uuid IS NULL OR r.id=$2)
+       AND ($2::uuid IS NOT NULL OR EXISTS(SELECT 1 FROM table_qr_codes q WHERE q.resource_id=r.id)
+         OR EXISTS(SELECT 1 FROM venue_resource_mappings m WHERE m.linked_resource_id=r.id AND m.verified_at IS NOT NULL))
        AND ($3::uuid IS NULL OR r.zone_id=$3)
        AND NOT EXISTS (
          SELECT 1 FROM command_center_reservations b
@@ -235,7 +240,7 @@ export async function selectReservableResource(
         "RESOURCE_UNAVAILABLE",
         "Это место пока нельзя забронировать автоматически",
       );
-    if (requested.rows[0].capacity === null || requested.rows[0].capacity < input.guests)
+    if (requested.rows[0].capacity !== null && requested.rows[0].capacity < input.guests)
       throw new ApiError(422, "CAPACITY", "В выбранной комнате недостаточно мест");
     throw new ApiError(409, "CONFLICT", "Это место уже занято на выбранное время");
   }
@@ -243,14 +248,18 @@ export async function selectReservableResource(
   const count = await client.query<{ eligible: boolean; reservable: boolean }>(
     `SELECT EXISTS(SELECT 1 FROM venue_resources r JOIN venue_zones z ON z.id=r.zone_id
        WHERE r.venue_code='xoxo' AND z.is_active
-       AND ($1::uuid IS NULL OR r.zone_id=$1) AND r.capacity >= $2) AS eligible,
+       AND ($1::uuid IS NULL OR r.zone_id=$1) AND (r.capacity IS NULL OR r.capacity >= $2)) AS eligible,
        EXISTS(SELECT 1 FROM venue_resources r JOIN venue_zones z ON z.id=r.zone_id
        WHERE r.venue_code='xoxo' AND z.is_active
        AND ($1::uuid IS NULL OR r.zone_id=$1) AND r.is_reservable AND r.status='active') AS reservable`,
     [input.zoneId ?? null, input.guests],
   );
   if (!count.rows[0]?.reservable)
-    throw new ApiError(409, "ZONE_UNVERIFIED", "В этой зоне ещё не подтверждены бронируемые места");
+    throw new ApiError(
+      409,
+      "ZONE_UNAVAILABLE",
+      "В этой зоне сейчас нет доступных для бронирования мест",
+    );
   if (!count.rows[0]?.eligible)
     throw new ApiError(422, "CAPACITY", "В этой зоне нет места для указанного числа гостей");
   throw new ApiError(409, "NO_AVAILABILITY", "Нет свободных подходящих мест на это время");

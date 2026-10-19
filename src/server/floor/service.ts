@@ -194,8 +194,7 @@ async function physical(client: PoolClient, venueId: string, resourceId: string)
   const row = (
     await client.query(
       `SELECT r.*,q.enabled,z.is_active, m.relationship,m.linked_resource_id,m.verified_at,
-   CASE WHEN m.verified_at IS NOT NULL AND m.relationship IN('linked','independent') THEN COALESCE(m.linked_resource_id,r.id)
-        ELSE NULL END AS booking_resource_id
+   COALESCE(m.linked_resource_id,r.id) AS booking_resource_id
    FROM venue_resources r JOIN table_qr_codes q ON q.resource_id=r.id AND q.venue_id=r.venue_id
    JOIN venue_zones z ON z.id=r.zone_id LEFT JOIN venue_resource_mappings m ON m.resource_id=r.id
    WHERE r.id=$1 AND r.venue_id=$2 FOR UPDATE OF r`,
@@ -332,11 +331,7 @@ export async function floorSnapshot(venueId: string, raw: unknown): Promise<Floo
       const currentReservation =
         activeReservations.find((b) => b.startsAt <= at && b.endsAt > at) ?? null;
       const nextReservation = activeReservations.find((b) => b.startsAt > at) ?? null;
-      const bookable =
-        !!row.verified_at &&
-        !!row.booking_reservable &&
-        row.booking_status === "active" &&
-        row.booking_capacity !== null;
+      const bookable = !!row.booking_reservable && row.booking_status === "active";
       const visitConflict = visits.some(
         (s) =>
           s.seatedAt && s.seatedAt < intervalEndsAt && (!projectedEnd(s) || projectedEnd(s)! > at),
@@ -360,7 +355,6 @@ export async function floorSnapshot(venueId: string, raw: unknown): Promise<Floo
         warnings.push(
           "QR-активность длится более 12 часов; проверьте незавершённые заказы и подтвердите состояние стола",
         );
-      if (!row.verified_at) warnings.push("Требуется подтверждение физического соответствия");
       if (
         !row.schedule_available &&
         !activeReservations.some((b) => b.startsAt < intervalEndsAt && b.endsAt > at)
@@ -697,7 +691,7 @@ export async function createFloorReservation(
           [resource.booking_resource_id, venueId],
         )
       ).rows[0];
-      if (!target?.capacity || input.guests > target.capacity)
+      if (!target || (target.capacity !== null && input.guests > target.capacity))
         throw new ApiError(422, "CAPACITY", "Место недоступно для указанного количества гостей");
       const seated = (
         await client.query(
@@ -886,7 +880,7 @@ export async function updateFloorReservation(
             [resource.booking_resource_id, venueId],
           )
         ).rows[0];
-        if (!target?.capacity || previous.guests > target.capacity)
+        if (!target || (target.capacity !== null && previous.guests > target.capacity))
           throw new ApiError(422, "INVENTORY_UNVERIFIED", "Выбранный стол недоступен для переноса");
         targetId = target.id;
         tableCode = target.code;

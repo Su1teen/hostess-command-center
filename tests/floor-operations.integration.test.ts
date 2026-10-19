@@ -159,7 +159,10 @@ test("staff RBAC, origin protection and no public folio capability", async () =>
         idempotencyKey: randomToken(),
       })
     ).status,
-  ).toBe(403);
+  ).toBe(201);
+  await pool.query(
+    "UPDATE command_center_reservations SET status='cancelled' WHERE guest_name='No permission'",
+  );
   const forged = await handleBookingApi(
     new Request("https://command.test/api/staff/v1/floor/seat", {
       method: "POST",
@@ -762,4 +765,80 @@ test("unconfirmed 12-hour idle activity expires with forgotten orders, isolates 
     ).rows[0].dining_session_id,
   ).toBe(seated);
   expect((await sessionFolio(venueId, seated)).session.closedAt).toBeNull();
+});
+
+test("unknown physical capacity and pending attestation allow booking and seating independently of QR access", async () => {
+  const target = (
+    await pool.query(`SELECT r.id,r.code,q.token FROM venue_resources r JOIN table_qr_codes q ON q.resource_id=r.id
+    JOIN venue_resource_mappings m ON m.resource_id=r.id WHERE m.linked_resource_id IS NULL AND m.legacy_code IS NULL
+    AND NOT EXISTS(SELECT 1 FROM dining_sessions s WHERE s.resource_id=r.id AND s.closed_at IS NULL)
+    AND NOT EXISTS(SELECT 1 FROM command_center_reservations b WHERE b.status NOT IN('cancelled','no_show') AND hostess_inventory_conflicts(COALESCE(b.table_ids,ARRAY[b.table_id]),ARRAY[r.code])) ORDER BY r.code DESC LIMIT 1`)
+  ).rows[0];
+  expect(!!target).toBe(true);
+  await pool.query(
+    "UPDATE venue_resource_mappings SET relationship='pending',verified_at=NULL,verified_by=NULL WHERE resource_id=$1",
+    [target.id],
+  );
+  await pool.query("UPDATE venue_resources SET capacity=NULL,is_reservable=true WHERE id=$1", [
+    target.id,
+  ]);
+  await pool.query("UPDATE table_qr_codes SET enabled=false WHERE resource_id=$1", [target.id]);
+  const startsAt = future(70 * 1440),
+    endsAt = future(70 * 1440 + 120);
+  const availability = await listVenueAvailability(pool, startsAt, endsAt, 20, null);
+  expect(availability.resources.find((r) => r.id === target.id)).toMatchObject({
+    capacity: null,
+    bookable: true,
+    fitsGuestCount: true,
+    available: true,
+  });
+  const booking = await createFloorReservation(venueId, "operator", {
+    resourceId: target.id,
+    guestName: "Unknown capacity fixture",
+    guests: 20,
+    startsAt,
+    endsAt,
+    source: "whatsapp",
+    idempotencyKey: randomToken(),
+  });
+  await expect(
+    createFloorReservation(venueId, "operator", {
+      resourceId: target.id,
+      guestName: "Competing public fixture",
+      guests: 2,
+      startsAt,
+      endsAt,
+      source: "website",
+      idempotencyKey: randomToken(),
+    }),
+  ).rejects.toMatchObject({ code: "23P01" });
+  expect(booking.reservation.source).toBe("whatsapp");
+  const seated = await seatGuests(venueId, "operator", {
+    resourceId: target.id,
+    guests: 6,
+    expectedEndAt: future(60),
+    idempotencyKey: randomToken(),
+  });
+  const snapshot = await floorSnapshot(venueId, {});
+  const visible = snapshot.zones.flatMap((z) => z.resources).find((r) => r.id === target.id)!;
+  expect(visible.state).toBe("seated");
+  expect(visible.warnings.some((w) => w.includes("физического соответствия"))).toBe(false);
+  await expect(
+    createQuote(
+      { guestId: null, hash: hash(randomToken()) },
+      { qrToken: target.token, items: [{ productId, quantity: 1 }] },
+    ),
+  ).rejects.toMatchObject({ code: "TABLE_DISABLED" });
+  const staffOwner = { guestId: null, hash: hash("staff:independent-qr") };
+  const q = await createQuote(
+    staffOwner,
+    { qrToken: target.token, items: [{ productId, quantity: 1 }] },
+    { actor: "staff:independent-qr", sessionId: seated.session.id },
+  );
+  const order = await checkout(
+    staffOwner,
+    { quoteId: q.id, idempotencyKey: randomToken() },
+    "staff:independent-qr",
+  );
+  expect(order.order.source).toBe("staff");
 });

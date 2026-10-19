@@ -59,8 +59,6 @@ export async function handleFloorApi(request: Request): Promise<Response | null>
         ),
       );
     if (path === "/reservations" && request.method === "POST") {
-      if (staff.role !== "manager")
-        throw new ApiError(403, "MANAGER_REQUIRED", "Бронирования изменяет менеджер");
       return json(
         await createFloorReservation(
           v.id,
@@ -72,8 +70,6 @@ export async function handleFloorApi(request: Request): Promise<Response | null>
     }
     const reservationChange = /^\/reservations\/([a-f0-9-]{36})$/.exec(path);
     if (reservationChange && request.method === "PATCH") {
-      if (staff.role !== "manager")
-        throw new ApiError(403, "MANAGER_REQUIRED", "Бронирования изменяет менеджер");
       return json(
         await updateFloorReservation(
           v.id,

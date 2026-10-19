@@ -57,7 +57,7 @@ function VisitSummary({ session, onOpen }: { session: FloorSession; onOpen: () =
   return (
     <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 text-sm">
       <p className="font-semibold">
-        {session.seatedAt ? "Гости на месте" : "QR-активность · посадка не подтверждена"}
+        {session.seatedAt ? "Гости на месте" : "Заказы за столом · посадка не подтверждена"}
       </p>
       <p className="mt-2 text-xs text-slate-600">
         {session.guestName ?? "Гость без аккаунта"}
@@ -152,19 +152,10 @@ export function FloorTableDrawer({
     resource.sessions.find((item) => item.id === folioId) ??
     (current?.id === folioId ? current : null);
   const expectedIso = expectedDate && expectedTime ? almatyToIso(expectedDate, expectedTime) : null;
-  const canSeat =
-    live &&
-    canWrite &&
-    resource.enabled &&
-    resource.relationship !== "pending" &&
-    !current?.seatedAt;
-  const bookable = canManage && resource.bookable;
+  const canSeat = live && canWrite && resource.state !== "blocked" && !current?.seatedAt;
+  const bookable = canWrite && resource.bookable;
   return (
-    <FloorDialog
-      title={resource.name}
-      description={`${zoneName} · ${resource.capacity ? `${resource.capacity} мест` : "Вместимость не задана"}`}
-      onClose={onClose}
-    >
+    <FloorDialog title={resource.name} description={zoneName} onClose={onClose}>
       <div className="space-y-5">
         <div
           className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-medium"
@@ -206,7 +197,9 @@ export function FloorTableDrawer({
             <p className="mt-2 text-xs text-slate-600">
               {formatDateTimeAlmaty(event.startsAt)}–{formatDateTimeAlmaty(event.endsAt)}
             </p>
-            <p className="mt-2 break-all text-[10px] text-slate-400">hostess_holds · {event.id}</p>
+            {canManage && (
+              <p className="mt-2 break-all text-[10px] text-slate-400">Удержание · {event.id}</p>
+            )}
           </section>
         )}
         {!!resource.warnings.length && (
@@ -278,12 +271,14 @@ export function FloorTableDrawer({
           </section>
         )}
         <div className="grid grid-cols-2 gap-2">
-          {canWrite && current?.seatedAt && live && (
+          {canWrite && resource.state !== "blocked" && live && (
             <button
               className={`${controlClass} col-span-2`}
-              onClick={() => openStaffOrder(current.id)}
+              onClick={() =>
+                openStaffOrder(current?.seatedAt ? current.id : undefined, resource.id)
+              }
             >
-              Создать заказ / код гостю
+              Создать заказ
             </button>
           )}
           {bookable && (
@@ -455,7 +450,7 @@ export function FloorTableDrawer({
             key={focusedReservation.id}
             reservation={focusedReservation}
             resource={resource}
-            canWrite={canManage}
+            canWrite={canWrite}
             onSeat={
               canSeat
                 ? () => {
@@ -481,6 +476,31 @@ export function FloorTableDrawer({
               <FloorFolio sessionId={folioId} />
             </div>
           </>
+        )}
+        {canManage && (
+          <details className="border-t pt-4">
+            <summary className="cursor-pointer text-sm font-medium">
+              Административные параметры
+            </summary>
+            <div className="mt-3 space-y-2 text-xs text-slate-500">
+              <p>
+                Вместимость:{" "}
+                {resource.capacity ?? "не указана; ограничение по числу мест не применяется"}
+              </p>
+              <p>Бронирование: {resource.bookable ? "включено" : "отключено"}</p>
+              <p>
+                Соответствие старому инвентарю:{" "}
+                {resource.relationship === "pending"
+                  ? "требует уточнения"
+                  : resource.relationship === "linked"
+                    ? "связано с существующим местом"
+                    : "самостоятельное место"}
+              </p>
+              <a className="inline-block min-h-11 content-center underline" href="/tables/qr">
+                Открыть настройки столов и QR
+              </a>
+            </div>
+          </details>
         )}
         <details className="border-t pt-4">
           <summary className="cursor-pointer text-sm font-medium">
@@ -778,9 +798,6 @@ function FloorReservationDetail({
           {mutation.error.message}
         </p>
       )}
-      <p className="break-all text-[10px] text-slate-400">
-        command_center_reservations · {reservation.id}
-      </p>
     </section>
   );
 }

@@ -5,6 +5,7 @@ import { money, staffApi, useStaffRole, controlClass } from "../../lib/dine-in-c
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../ui/sheet";
 import { AlcoholCatalog } from "../catalog/AlcoholCatalog";
 import { XoxoDrinkCatalog } from "./XoxoDrinkCatalog";
+import { MenuImport } from "./MenuImport";
 
 type MenuItem = {
   id: string;
@@ -47,6 +48,10 @@ export function MenuScreen() {
   const [search, setSearch] = useState(""),
     [category, setCategory] = useState("Все блюда"),
     [draft, setDraft] = useState<Draft | null>(null);
+  const [view, setView] = useState("grid"),
+    [stateFilter, setStateFilter] = useState("all"),
+    [sort, setSort] = useState("category");
+  const [selected, setSelected] = useState<string[]>([]);
   const query = useQuery({
     queryKey: ["regular-menu-staff"],
     queryFn: ({ signal }) => staffApi<{ items: MenuItem[] }>("/dine-in/menu-items", { signal }),
@@ -56,15 +61,46 @@ export function MenuScreen() {
   const categories = ["Все блюда", ...Array.from(new Set(items.map((item) => item.category)))];
   const filtered = useMemo(
     () =>
-      items.filter(
-        (item) =>
-          (category === "Все блюда" || category === item.category) &&
-          `${item.name} ${item.description}`
-            .toLocaleLowerCase()
-            .includes(search.toLocaleLowerCase()),
-      ),
-    [items, category, search],
+      items
+        .filter(
+          (item) =>
+            (category === "Все блюда" || category === item.category) &&
+            (stateFilter === "all" ||
+              (stateFilter === "published"
+                ? item.published
+                : stateFilter === "draft"
+                  ? !item.published
+                  : !item.isAvailable)) &&
+            `${item.name} ${item.description}`
+              .toLocaleLowerCase()
+              .includes(search.toLocaleLowerCase()),
+        )
+        .sort((a, b) =>
+          sort === "price"
+            ? Number(a.priceMinor) - Number(b.priceMinor)
+            : sort === "name"
+              ? a.name.localeCompare(b.name, "ru")
+              : a.sortOrder - b.sortOrder || a.category.localeCompare(b.category, "ru"),
+        ),
+    [items, category, search, stateFilter, sort],
   );
+  const batch = useMutation({
+    mutationFn: (action: string) =>
+      staffApi("/dine-in/menu-items/batch", {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          items: items
+            .filter((i) => selected.includes(i.id))
+            .map((i) => ({ id: i.id, version: i.version })),
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      }),
+    onSuccess: () => {
+      setSelected([]);
+      void client.invalidateQueries({ queryKey: ["regular-menu-staff"] });
+    },
+  });
   const save = useMutation({
     mutationFn: async (value: Draft) => {
       if (!/^\d+(\.\d{1,2})?$/.test(value.price))
@@ -131,6 +167,7 @@ export function MenuScreen() {
           </button>
         )}
       </header>
+      {canEdit && section === "menu" && <MenuImport />}
       <div className="grid grid-cols-2 gap-3">
         <button
           onClick={() => setSection("menu")}
@@ -189,6 +226,73 @@ export function MenuScreen() {
               </button>
             ))}
           </div>
+          <div className="flex flex-wrap gap-2">
+            <select
+              aria-label="Публикация и стоп-лист"
+              value={stateFilter}
+              onChange={(e) => setStateFilter(e.target.value)}
+              className={controlClass}
+            >
+              <option value="all">Все позиции</option>
+              <option value="published">Опубликованы</option>
+              <option value="draft">Черновики</option>
+              <option value="stop">Стоп-лист</option>
+            </select>
+            <select
+              aria-label="Сортировка меню"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              className={controlClass}
+            >
+              <option value="category">По категориям</option>
+              <option value="name">По названию</option>
+              <option value="price">По цене</option>
+            </select>
+            <button
+              className={controlClass}
+              onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
+            >
+              {view === "grid" ? "Показать списком" : "Показать сеткой"}
+            </button>
+            {canEdit && (
+              <button
+                className={controlClass}
+                onClick={() => setSelected(selected.length ? [] : filtered.map((i) => i.id))}
+              >
+                {selected.length ? "Снять выбор" : "Выбрать показанные"}
+              </button>
+            )}
+          </div>
+          {canEdit && selected.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-white p-3">
+              <strong className="text-sm">Выбрано: {selected.length}</strong>
+              {[
+                ["publish", "Опубликовать"],
+                ["unpublish", "Снять с публикации"],
+                ["stop", "В стоп-лист"],
+                ["available", "Вернуть в меню"],
+              ].map(([action, label]) => (
+                <button
+                  key={action}
+                  disabled={batch.isPending}
+                  className={controlClass}
+                  onClick={() => batch.mutate(action)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {batch.error && (
+            <p role="alert" className="text-sm text-red-700">
+              {batch.error.message}
+            </p>
+          )}
+          {save.error && !draft && (
+            <p role="alert" className="text-sm text-red-700">
+              {save.error.message}
+            </p>
+          )}
           {query.error && (
             <p role="alert" className="rounded-2xl bg-red-50 p-4 text-red-800">
               {query.error.message}
@@ -202,13 +306,19 @@ export function MenuScreen() {
               Загружаем меню…
             </p>
           )}
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <section
+            className={view === "grid" ? "grid gap-3 sm:grid-cols-2 xl:grid-cols-3" : "grid gap-3"}
+          >
             {filtered.map((item) => (
               <article
                 key={item.id}
                 className="overflow-hidden rounded-3xl border border-slate-100 bg-white"
               >
-                <div className="relative h-40 bg-amber-50">
+                <div
+                  className={
+                    view === "grid" ? "relative h-40 bg-amber-50" : "relative h-14 bg-amber-50"
+                  }
+                >
                   {item.imageUrl ? (
                     <img
                       src={item.imageUrl}
@@ -228,12 +338,35 @@ export function MenuScreen() {
                   </span>
                 </div>
                 <div className="p-4">
+                  {canEdit && (
+                    <label className="mb-2 flex min-h-11 items-center gap-2 text-xs text-slate-500">
+                      <input
+                        type="checkbox"
+                        aria-label={`Выбрать ${item.name} ${item.portion}`}
+                        checked={selected.includes(item.id)}
+                        onChange={(e) =>
+                          setSelected((prev) =>
+                            e.target.checked
+                              ? [...prev, item.id]
+                              : prev.filter((id) => id !== item.id),
+                          )
+                        }
+                      />
+                      Выбрать
+                    </label>
+                  )}
                   <p className="text-xs text-slate-500">
                     {item.category}
                     {item.portion ? ` · ${item.portion}` : ""}
                   </p>
                   <h2 className="mt-1 text-lg font-bold">{item.name}</h2>
-                  <p className="mt-1 line-clamp-2 min-h-10 text-sm text-slate-500">
+                  <p
+                    className={
+                      view === "grid"
+                        ? "mt-1 line-clamp-2 min-h-10 text-sm text-slate-500"
+                        : "mt-1 line-clamp-1 text-xs text-slate-500"
+                    }
+                  >
                     {item.description || "Описание пока не добавлено"}
                   </p>
                   <div className="mt-4 flex items-center justify-between gap-3">
@@ -244,6 +377,51 @@ export function MenuScreen() {
                       </button>
                     )}
                   </div>
+                  {canEdit && (
+                    <details className="mt-3 border-t pt-3">
+                      <summary className="cursor-pointer text-xs text-slate-500">
+                        Быстрые изменения
+                      </summary>
+                      <button
+                        disabled={batch.isPending}
+                        className={`${controlClass} mt-2 w-full`}
+                        onClick={() =>
+                          save.mutate({
+                            ...item,
+                            price: (Number(item.priceMinor) / 100).toFixed(2),
+                            allergensText: item.allergens.join(", "),
+                            isAvailable: !item.isAvailable,
+                          })
+                        }
+                      >
+                        {item.isAvailable ? "В стоп-лист" : "Вернуть в меню"}
+                      </button>
+                      <form
+                        className="mt-2 flex flex-wrap gap-2"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const data = new FormData(e.currentTarget);
+                          save.mutate({
+                            ...item,
+                            price: String(data.get("price")).replace(",", "."),
+                            allergensText: item.allergens.join(", "),
+                          });
+                        }}
+                      >
+                        <input
+                          key={item.version}
+                          name="price"
+                          aria-label={`Цена ${item.name} ${item.portion}`}
+                          defaultValue={(Number(item.priceMinor) / 100).toFixed(2)}
+                          inputMode="decimal"
+                          className={`${controlClass} min-w-0 flex-1`}
+                        />
+                        <button disabled={save.isPending} className={controlClass}>
+                          Сохранить цену
+                        </button>
+                      </form>
+                    </details>
+                  )}
                 </div>
               </article>
             ))}
