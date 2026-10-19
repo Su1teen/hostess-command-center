@@ -74,7 +74,7 @@ Screenshots are isolated fixture data, not real guest activity:
 
 Before rollout, both `https://admin.hostes.online/health` and the Railway origin returned 200 with database healthy. The custom domain has a valid Railway certificate and responds over HTTPS despite Railway's inconsistent DNS diagnostic. Origin configuration is preserved.
 
-Read-only production inventory counts: First hall 8, Second hall 3, PS 3, VIP 3, total 17. A separate requested token-hash comparison was rejected by automatic approval review; no production token-by-token comparison is claimed. Migration text contains no QR/inventory updates and isolated preservation tests pass.
+Read-only production inventory counts: First hall 8, Second hall 3, PS 3, VIP 3, total 17. An approved server-only in-memory before/after comparison confirmed that all 17 QR credentials, generations, physical zone assignments and persisted layouts survived migration unchanged. No tokens or credential-derived hashes were exported. See [delivery evidence](SERVICE_EXPERIENCE_3_DELIVERY.md).
 
 Railway native backup created before migration: `1c7f9096-9543-404e-9711-2684fcabc9ea`, 2026-10-19T00:26:50.119Z, “Before service experience 3 additive migration”. Credentials were not exported. This is a native snapshot confirmation, not a claimed production restore rehearsal. No real guest test orders/reservations/loyalty writes were made.
 

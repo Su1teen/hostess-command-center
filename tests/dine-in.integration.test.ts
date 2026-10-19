@@ -13,6 +13,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { pool } from "../src/server/db/pool";
 import { transaction, newSession } from "../src/server/guest/auth";
+import { checkStaffOrigin } from "../src/server/guest/auth";
 import { hash, randomToken } from "../src/server/guest/security";
 import { handleBookingApi } from "../src/server/guest/api";
 import { createQuote, checkout, changeStatus, type Owner } from "../src/server/dine-in/service";
@@ -1577,4 +1578,46 @@ test("staff wallet requires verified arrived reservation context and preserves 3
   const order = (await result.json()).order;
   expect(order.guestId).toBe(g.id);
   expect((await balance(g.id)).balanceMinor).toBe(4400);
+});
+
+test("verified custom staff origins are explicit, exact and preserve the Railway origin", () => {
+  const previousOrigin = process.env.COMMAND_CENTER_ORIGIN,
+    previousAdditional = process.env.COMMAND_CENTER_ADDITIONAL_ORIGINS;
+  const request = (origin: string) => new Request("https://command.test", { headers: { origin } });
+  const rejected = (origin: string) => {
+    let denied = false;
+    try {
+      checkStaffOrigin(request(origin));
+    } catch (e) {
+      expect(e).toMatchObject({ code: "CSRF" });
+      denied = true;
+    }
+    expect(denied).toBe(true);
+  };
+  try {
+    process.env.COMMAND_CENTER_ORIGIN = "https://hostess-command-center-production.up.railway.app";
+    delete process.env.COMMAND_CENTER_ADDITIONAL_ORIGINS;
+    rejected("https://admin.hostes.online");
+    process.env.COMMAND_CENTER_ADDITIONAL_ORIGINS =
+      "https://admin.hostes.online, https://malformed.example/path, http://insecure.example, https://*.example.com";
+    checkStaffOrigin(request("https://admin.hostes.online"));
+    checkStaffOrigin(request("https://hostess-command-center-production.up.railway.app"));
+    for (const origin of [
+      "https://admin.hostes.online.evil.test",
+      "https://admin.hostes.online/",
+      "http://admin.hostes.online",
+      "https://malformed.example",
+      "http://insecure.example",
+      "https://*.example.com",
+      "null",
+    ])
+      rejected(origin);
+    delete process.env.COMMAND_CENTER_ORIGIN;
+    rejected("https://admin.hostes.online");
+  } finally {
+    if (previousOrigin === undefined) delete process.env.COMMAND_CENTER_ORIGIN;
+    else process.env.COMMAND_CENTER_ORIGIN = previousOrigin;
+    if (previousAdditional === undefined) delete process.env.COMMAND_CENTER_ADDITIONAL_ORIGINS;
+    else process.env.COMMAND_CENTER_ADDITIONAL_ORIGINS = previousAdditional;
+  }
 });
