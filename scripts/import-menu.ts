@@ -25,7 +25,10 @@ try {
   );
   if (apply) {
     const idempotencyKey =
-      "menu-import:" + createHash("sha256").update(JSON.stringify(manifest.items)).digest("hex");
+      "menu-import:" +
+      createHash("sha256")
+        .update(JSON.stringify({ items: manifest.items, previewToken: preview.previewToken }))
+        .digest("hex");
     const result = await importMenu(venue.id, actor, {
       mode: "apply",
       items: manifest.items,

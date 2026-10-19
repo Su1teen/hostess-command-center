@@ -4,6 +4,9 @@ import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { createServer, type Server } from "node:http";
 import { guestBrowserCheckout } from "./cross-guest-browser";
+import { execFile, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
+const runFile = promisify(execFile);
 
 import { createRequire } from "node:module";
 const xoxoRoot = process.env.XOXO_SOURCE_ROOT;
@@ -374,17 +377,49 @@ try {
         items: official.items,
       });
       assert.equal(preview.counts.create, 119);
-      await importMenu(table.venue_id, manager, {
-        mode: "apply",
-        items: official.items,
-        previewToken: preview.previewToken,
-        idempotencyKey: randomUUID(),
-      });
+      const cliBuild = spawnSync(
+        "bun",
+        [
+          "build",
+          "scripts/import-menu.ts",
+          "--target=node",
+          "--packages=external",
+          "--outfile=.output/cross-menu-cli.mjs",
+        ],
+        { encoding: "utf8", windowsHide: true },
+      );
+      assert.equal(cliBuild.status, 0, cliBuild.stderr);
+      const cli = async () => {
+        const result = await runFile(process.execPath, [".output/cross-menu-cli.mjs", "--apply"], {
+          env: { ...process.env, DATABASE_URL: senderUrl },
+          windowsHide: true,
+          timeout: 30000,
+          maxBuffer: 2_000_000,
+        });
+        return JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+      };
+      assert.equal((await cli()).counts.create, 119);
       const secondImport = await importMenu(table.venue_id, manager, {
         mode: "preview",
         items: official.items,
       });
       assert.equal(secondImport.counts.unchanged, 119);
+      for (let retry = 0; retry < 2; retry++)
+        assert.deepEqual((await cli()).counts, {
+          create: 0,
+          update: 0,
+          unchanged: 119,
+          exchange: 0,
+          duplicate: 0,
+        });
+      assert.equal(
+        (
+          await pool.query(
+            "SELECT max(version)::int AS version FROM venue_menu_items WHERE source_key IS NOT NULL",
+          )
+        ).rows[0].version,
+        1,
+      );
       const catalog = await (
         await fetch(bffOrigin + "/api/guest/v1/dine-in/regular-menu?venue=xoxo")
       ).json();
