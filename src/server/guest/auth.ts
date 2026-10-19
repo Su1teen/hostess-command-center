@@ -29,7 +29,18 @@ export async function requireStaff(write = false, manager = false) {
 }
 export function checkStaffOrigin(request: Request) {
   const expected = process.env.COMMAND_CENTER_ORIGIN;
-  if (!expected || request.headers.get("origin") !== expected)
+  const additional = (process.env.COMMAND_CENTER_ADDITIONAL_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => {
+      try {
+        const url = new URL(value);
+        return url.protocol === "https:" && url.origin === value && !url.hostname.includes("*");
+      } catch {
+        return false;
+      }
+    });
+  if (!expected || ![expected, ...additional].includes(request.headers.get("origin") ?? ""))
     throw new ApiError(403, "CSRF", "Недопустимый источник запроса");
 }
 export function serviceActor(request: Request): "bff" | "whatsapp" {
