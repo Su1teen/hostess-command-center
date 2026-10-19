@@ -58,12 +58,6 @@ export const registryInput = z
         message: "Укажите основание проверки (не менее 3 символов)",
         path: ["verificationNote"],
       });
-    if (value.bookable && (!value.verified || value.capacity === null))
-      context.addIssue({
-        code: "custom",
-        message: "Для бронирования подтвердите расположение и вместимость",
-        path: ["bookable"],
-      });
   });
 export const bulkInput = z
   .object({
@@ -97,9 +91,9 @@ export async function listRegistry(venueId: string, db: Db = pool) {
     m.linked_resource_id AS "linkedResourceId",target.name AS "linkedResourceName",target.code AS "linkedResourceCode",
     m.note AS "verificationNote",m.verified_at AS "verifiedAt",(m.verified_at IS NOT NULL) AS "mappingVerified",
     CASE WHEN m.verified_at IS NOT NULL AND m.linked_resource_id IS NOT NULL THEN target.is_reservable ELSE r.is_reservable END AS bookable,
-    CASE WHEN m.verified_at IS NULL THEN 'pending' WHEN
-      CASE WHEN m.linked_resource_id IS NOT NULL THEN target.is_reservable AND target.status='active' AND target_zone.is_active AND target.capacity IS NOT NULL
-      ELSE r.is_reservable AND r.status='active' AND z.is_active AND r.capacity IS NOT NULL END THEN 'available' ELSE 'unavailable' END AS "bookingState"
+    CASE WHEN
+      CASE WHEN m.linked_resource_id IS NOT NULL THEN target.is_reservable AND target.status='active' AND target_zone.is_active
+      ELSE r.is_reservable AND r.status='active' AND z.is_active END THEN 'available' ELSE 'unavailable' END AS "bookingState"
     FROM table_qr_codes q JOIN venue_resources r ON r.id=q.resource_id JOIN venue_zones z ON z.id=r.zone_id
     LEFT JOIN venue_resource_mappings m ON m.resource_id=r.id LEFT JOIN venue_resources target ON target.id=m.linked_resource_id
     LEFT JOIN venue_zones target_zone ON target_zone.id=target.zone_id

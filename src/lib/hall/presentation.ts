@@ -7,10 +7,10 @@ export const FLOOR_STATE_LABEL: Record<FloorState, string> = {
   free: "Свободен",
   reserved: "Забронирован",
   seated: "Гости на месте",
-  qr_activity: "QR-заказы · посадка не подтверждена",
+  qr_activity: "Ожидается заказ · посадка не подтверждена",
   overdue: "Время визита превышено",
   blocked: "Вне обслуживания",
-  unconfigured: "Нужна настройка инвентаря",
+  unconfigured: "Бронирование отключено",
 };
 export const FLOOR_STATE_STYLE: Record<
   FloorState,

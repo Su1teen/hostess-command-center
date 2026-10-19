@@ -2,7 +2,7 @@ import type { PoolClient } from "pg";
 import { z } from "zod";
 import { pool } from "../db/pool";
 import { transaction, type Session } from "../guest/auth";
-import { ApiError } from "../guest/security";
+import { ApiError, hash } from "../guest/security";
 import type { Line } from "./domain";
 
 const imageUrl = z
@@ -54,6 +54,7 @@ export async function saveMenuItem(venueId: string, staff: Session, raw: unknown
   if (id && !input.version)
     throw new ApiError(422, "VERSION_REQUIRED", "Обновите карточку перед сохранением");
   return transaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`menu:${venueId}`]);
     const params = [
       venueId,
       input.name,
@@ -127,6 +128,74 @@ export async function regularPriceLines(
   });
 }
 
+export async function batchMenuItems(venueId: string, staff: Session, raw: unknown) {
+  const input = z
+    .object({
+      action: z.enum(["publish", "unpublish", "stop", "available"]),
+      items: z
+        .array(z.object({ id: z.string().uuid(), version: z.number().int().positive() }).strict())
+        .min(1)
+        .max(500),
+      idempotencyKey: z.string().min(16).max(128),
+    })
+    .strict()
+    .parse(raw);
+  if (new Set(input.items.map((i) => i.id)).size !== input.items.length)
+    throw new ApiError(422, "DUPLICATE_ITEM", "Позиция повторяется");
+  return transaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`menu:${venueId}`]);
+    const signature = hash(
+      JSON.stringify({ actor: staff.staff_id, operation: "menu-batch", ...input }),
+    );
+    const prior = (
+      await client.query(
+        "SELECT request_hash,response FROM floor_operation_idempotency WHERE venue_id=$1 AND key=$2",
+        [venueId, input.idempotencyKey],
+      )
+    ).rows[0];
+    if (prior) {
+      if (prior.request_hash !== signature)
+        throw new ApiError(409, "IDEMPOTENCY_MISMATCH", "Ключ операции уже использован");
+      return prior.response;
+    }
+    const rows = (
+      await client.query(
+        "SELECT id,version FROM venue_menu_items WHERE venue_id=$1 AND id=ANY($2::uuid[]) FOR UPDATE",
+        [venueId, input.items.map((i) => i.id)],
+      )
+    ).rows;
+    if (
+      rows.length !== input.items.length ||
+      rows.some((row) => input.items.find((i) => i.id === row.id)?.version !== row.version)
+    )
+      throw new ApiError(
+        409,
+        "MENU_CHANGED",
+        "Одна из позиций изменилась. Обновите меню и повторите выбор",
+      );
+    const assignment = {
+      publish: "published=true",
+      unpublish: "published=false",
+      stop: "is_available=false",
+      available: "is_available=true",
+    }[input.action];
+    await client.query(
+      `UPDATE venue_menu_items SET ${assignment},version=version+1,updated_at=clock_timestamp() WHERE venue_id=$1 AND id=ANY($2::uuid[])`,
+      [venueId, input.items.map((i) => i.id)],
+    );
+    const result = { updated: rows.length };
+    await client.query(
+      "INSERT INTO hostess_audit(actor,action,entity_id,details) VALUES($1,'menu_batch',$2,$3)",
+      [`staff:${staff.staff_id}`, venueId, JSON.stringify(input)],
+    );
+    await client.query(
+      "INSERT INTO floor_operation_idempotency(venue_id,key,request_hash,response) VALUES($1,$2,$3,$4)",
+      [venueId, input.idempotencyKey, signature, JSON.stringify(result)],
+    );
+    return result;
+  });
+}
+
 export async function validateRegularQuote(client: PoolClient, venueId: string, lines: Line[]) {
   const regular = lines.filter((line) => line.itemType === "REGULAR_MENU");
   const current = await regularPriceLines(client, venueId, regular);
@@ -145,12 +214,10 @@ export async function occupancySignals(slugs: string[]) {
     await pool.query(
       `SELECT v.slug,
     count(r.id)::int AS capacity,
-    count(r.id) FILTER(WHERE m.verified_at IS NOT NULL AND m.relationship<>'pending')::int AS verified,
-    count(r.id) FILTER(WHERE m.verified_at IS NOT NULL AND m.relationship<>'pending' AND EXISTS(
+    count(r.id) FILTER(WHERE EXISTS(
       SELECT 1 FROM dining_sessions s WHERE s.resource_id=r.id AND s.closed_at IS NULL AND s.seated_at IS NOT NULL AND s.visit_status='seated'))::int AS occupied
     FROM hostess_venues v LEFT JOIN table_qr_codes q ON q.venue_id=v.id
     LEFT JOIN venue_resources r ON r.id=q.resource_id AND r.status='active'
-    LEFT JOIN venue_resource_mappings m ON m.resource_id=r.id
     WHERE v.active AND v.slug=ANY($1::text[]) GROUP BY v.slug`,
       [slugs],
     )
@@ -160,7 +227,7 @@ export async function occupancySignals(slugs: string[]) {
     updatedAt,
     signals: slugs.map((venueId) => {
       const row = rows.find((row) => row.slug === venueId);
-      const trustworthy = !!row?.capacity && row.verified === row.capacity;
+      const trustworthy = !!row?.capacity;
       const valuePercent = trustworthy ? Math.round((row.occupied * 100) / row.capacity) : null;
       return {
         venueId,

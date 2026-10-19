@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { openStaffOrder } from "../orders/ServiceOperations";
+import { openStaffOrder, openOrder } from "../orders/ServiceOperations";
 import { useStaffRole, controlClass } from "../../lib/dine-in-client";
 import { ExternalLink, ReceiptText } from "lucide-react";
 import { money, staffApi, statusLabels } from "../../lib/dine-in-client";
@@ -64,13 +64,15 @@ export function FloorFolio({ sessionId }: { sessionId: string }) {
             Завершение: {formatDateTimeAlmaty(folio.session.closedAt)}
           </p>
         )}
-        <details className="mt-2 text-xs text-slate-500">
-          <summary className="cursor-pointer">Источник визита</summary>
-          <p className="mt-1 break-all">dining_sessions · {folio.session.id}</p>
-          {folio.session.reservationId && (
-            <p className="mt-1 break-all">Бронь · {folio.session.reservationId}</p>
-          )}
-        </details>
+        {role === "manager" && (
+          <details className="mt-2 text-xs text-slate-500">
+            <summary className="cursor-pointer">Источник визита</summary>
+            <p className="mt-1 break-all">dining_sessions · {folio.session.id}</p>
+            {folio.session.reservationId && (
+              <p className="mt-1 break-all">Бронь · {folio.session.reservationId}</p>
+            )}
+          </details>
+        )}
       </div>
       {folio.orders.map((order) => (
         <article
@@ -79,6 +81,10 @@ export function FloorFolio({ sessionId }: { sessionId: string }) {
         >
           <a
             href={`/orders?order=${encodeURIComponent(order.id)}`}
+            onClick={(e) => {
+              e.preventDefault();
+              openOrder(order.id);
+            }}
             className="flex min-h-12 items-center justify-between gap-2 border-b px-3 py-3 text-sm font-semibold hover:bg-slate-50"
             aria-label={`Открыть заказ ${order.number}`}
           >
@@ -89,9 +95,11 @@ export function FloorFolio({ sessionId }: { sessionId: string }) {
             {formatDateTimeAlmaty(order.acceptedAt)} · {statusLabels[order.status]}
             {order.source === "staff"
               ? " · Оформлен сотрудником"
-              : order.source === "table_code"
-                ? " · Код стола"
-                : " · QR"}
+              : order.source === "web_app"
+                ? " · Сайт"
+                : order.source === "table_code"
+                  ? " · Код стола"
+                  : " · QR"}
           </p>
           <p className="px-3 pt-2 text-sm font-medium">{order.guestName ?? "Гость без аккаунта"}</p>
           <ul className="divide-y px-3">
@@ -170,8 +178,7 @@ export function FloorFolio({ sessionId }: { sessionId: string }) {
         ))}
       </dl>
       <p className="rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
-        Пилотный статус заказов: assumed_paid. Получение оплаты отмечает персонал; банковское
-        подтверждение не поступает. Кэшбэк 3%, срок бонусов 14 дней.
+        Оплату через терминал принимает и отмечает сотрудник. Кэшбэк — 3%, срок бонусов — 14 дней.
       </p>
       {!!folio.events.length && (
         <details className="rounded-xl border bg-white p-3 text-xs">

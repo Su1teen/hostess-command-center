@@ -12,7 +12,7 @@ export function json(data: unknown, status = 200, setCookie?: string) {
     headers: { ...responseHeaders, ...(setCookie ? { "set-cookie": setCookie } : {}) },
   });
 }
-export async function body(request: Request) {
+export async function body(request: Request, maximumBytes = 32768) {
   if (!request.headers.get("content-type")?.startsWith("application/json"))
     throw new ApiError(415, "JSON_REQUIRED", "Ожидается JSON");
   const reader = request.body?.getReader();
@@ -23,7 +23,7 @@ export async function body(request: Request) {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.length;
-    if (size > 32768) {
+    if (size > maximumBytes) {
       await reader.cancel();
       throw new ApiError(413, "TOO_LARGE", "Запрос слишком большой");
     }

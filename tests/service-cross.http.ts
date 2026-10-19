@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { createServer, type Server } from "node:http";
+import { guestBrowserCheckout } from "./cross-guest-browser";
 
 import { createRequire } from "node:module";
 const xoxoRoot = process.env.XOXO_SOURCE_ROOT;
@@ -14,6 +15,7 @@ const loadXoxo = async (path: string) => import(pathToFileURL(xoxoRoot + "/" + p
 const { parseEnv } = await loadXoxo("src/config/env.js");
 const { orderEventsRoutes } = await loadXoxo("src/modules/command-center/order-events.routes.js");
 const { publicRoutes } = await loadXoxo("src/modules/public-api/public.routes.js");
+const { commandCenterRoutes } = await loadXoxo("src/modules/command-center/command.routes.js");
 const { RoundsService } = await loadXoxo("src/modules/rounds/rounds.service.js");
 const { ExchangeService } = await loadXoxo("src/modules/exchange/exchange.service.js");
 const { AuditService } = await loadXoxo("src/services/audit.service.js");
@@ -70,6 +72,7 @@ app.decorate("prisma", prisma);
 app.decorate("services", { rounds, exchange } as never);
 await app.register(orderEventsRoutes);
 await app.register(publicRoutes);
+await app.register(commandCenterRoutes);
 try {
   assert.equal(
     await prisma.exchangeOrderEvent.count(),
@@ -82,7 +85,8 @@ try {
     .sort()) {
     await pool.query(readFileSync(senderRoot + "/src/server/db/migrations/" + file, "utf8"));
   }
-  const table = (await pool.query("SELECT token,venue_id FROM table_qr_codes LIMIT 1")).rows[0];
+  const table = (await pool.query("SELECT token,venue_id,resource_id FROM table_qr_codes LIMIT 1"))
+    .rows[0];
   const organization = await prisma.organization.create({
     data: { iikoOrganizationId: randomUUID(), name: "Isolated E2E", isSelected: true },
   });
@@ -352,19 +356,82 @@ try {
       second = await two.json();
     assert.equal(first.order.id, second.order.id);
     assert.equal(first.order.source, "table_code");
+    const physicalTables = await (
+      await fetch(bffOrigin + "/api/guest/v1/dine-in/tables?venue=xoxo")
+    ).json();
+    assert.equal(physicalTables.tables.length, 17);
+    assert.ok(!JSON.stringify(physicalTables).includes('"token"'));
+    const official = JSON.parse(
+      readFileSync(new URL("../docs/menu/official-menu.json", import.meta.url), "utf8"),
+    );
+    const { importMenu } = await load("src/server/dine-in/menu-import.ts");
+    const priorMode = process.env.EXCHANGE_DATA_MODE;
+    process.env.EXCHANGE_DATA_MODE = "api";
+    try {
+      const manager = { staff_id: "cross-menu-import", role: "manager", guest_id: null };
+      const preview = await importMenu(table.venue_id, manager, {
+        mode: "preview",
+        items: official.items,
+      });
+      assert.equal(preview.counts.create, 119);
+      await importMenu(table.venue_id, manager, {
+        mode: "apply",
+        items: official.items,
+        previewToken: preview.previewToken,
+        idempotencyKey: randomUUID(),
+      });
+      const secondImport = await importMenu(table.venue_id, manager, {
+        mode: "preview",
+        items: official.items,
+      });
+      assert.equal(secondImport.counts.unchanged, 119);
+      const catalog = await (
+        await fetch(bffOrigin + "/api/guest/v1/dine-in/regular-menu?venue=xoxo")
+      ).json();
+      for (const item of official.items) {
+        const actual = catalog.items.find(
+          (p: { name: string; portion: string; category: string }) =>
+            p.name === item.name && p.portion === item.portion && p.category === item.category,
+        );
+        assert.ok(actual, item.name);
+        assert.equal(Number(actual.priceMinor), item.priceMinor);
+      }
+    } finally {
+      if (priorMode === undefined) delete process.env.EXCHANGE_DATA_MODE;
+      else process.env.EXCHANGE_DATA_MODE = priorMode;
+    }
+    const webQuoteResponse = await bffPost("/dine-in/quotes", {
+      qrToken: `web_${table.resource_id}`,
+      items: [
+        { productId: product.id, quantity: 1 },
+        { productId: menuItem.id, quantity: 2, itemType: "REGULAR_MENU" },
+      ],
+    });
+    assert.equal(webQuoteResponse.status, 201);
+    const webCookie = webQuoteResponse.headers.get("set-cookie")!.split(";")[0];
+    const webQuote = await webQuoteResponse.json();
+    const webAttempt = { quoteId: webQuote.id, idempotencyKey: randomUUID() };
+    const [webOne, webTwo] = await Promise.all([
+      bffPost("/dine-in/orders", webAttempt, webCookie),
+      bffPost("/dine-in/orders", webAttempt, webCookie),
+    ]);
+    const webOrder = (await webOne.json()).order;
+    assert.equal(webOrder.id, (await webTwo.json()).order.id);
+    assert.equal(webOrder.source, "web_app");
+    assert.equal(webOrder.status, "new");
     const orders = (
       await pool.query("SELECT id FROM dine_in_orders WHERE dining_session_id=$1", [visit.id])
     ).rows;
-    assert.equal(orders.length, 4);
-    assert.deepEqual(await drainOutbox(), { delivered: 2, failed: 0 });
-    assert.equal(await prisma.exchangeOrderEvent.count(), 6);
+    assert.equal(orders.length, 5);
+    assert.deepEqual(await drainOutbox(), { delivered: 3, failed: 0 });
+    assert.equal(await prisma.exchangeOrderEvent.count(), 7);
     assert.equal(await prisma.exchangeSale.count(), 0);
     await changeStatus(first.order.id, table.venue_id, "cross-operator", "accepted");
     const receipt = await fetch(bffOrigin + "/api/guest/v1/dine-in/orders/" + first.order.id, {
       headers: { cookie },
     });
     assert.equal((await receipt.json()).order.status, "accepted");
-    for (const id of [staffOrder.order.id, first.order.id])
+    for (const id of [staffOrder.order.id, first.order.id, webOrder.id])
       await changeStatus(
         id,
         table.venue_id,
@@ -372,8 +439,35 @@ try {
         undefined,
         "Isolated cross-service compensation",
       );
-    assert.deepEqual(await drainOutbox(), { delivered: 2, failed: 0 });
-    assert.equal(await prisma.exchangeOrderEvent.count(), 8);
+    assert.deepEqual(await drainOutbox(), { delivered: 3, failed: 0 });
+    assert.equal(await prisma.exchangeOrderEvent.count(), 10);
+    const browserOrder = await guestBrowserCheckout({
+      hostessRoot: process.env.HOSTESS_SOURCE_ROOT!,
+      senderOrigin,
+      exchangeOrigin: process.env.EXCHANGE_API_ORIGIN!,
+      productName: product.name,
+      onCreated: async (id) => {
+        await changeStatus(id, table.venue_id, "cross-operator", "accepted");
+      },
+    });
+    assert.equal(
+      (
+        await pool.query("SELECT dining_session_id FROM dine_in_orders WHERE id=$1", [
+          browserOrder.id,
+        ])
+      ).rows[0].dining_session_id,
+      visit.id,
+    );
+    assert.deepEqual(await drainOutbox(), { delivered: 1, failed: 0 });
+    await changeStatus(
+      browserOrder.id,
+      table.venue_id,
+      "cross-manager",
+      undefined,
+      "Controlled browser test compensation",
+    );
+    assert.deepEqual(await drainOutbox(), { delivered: 1, failed: 0 });
+    assert.equal(await prisma.exchangeOrderEvent.count(), 12);
     console.log(
       "PASS actual Hostess BFF HTTP -> Command Center staff/no-QR checkout -> PostgreSQL -> XOXO outbox; status roundtrip; single visit; no manual sales",
     );
@@ -387,7 +481,8 @@ try {
       result: "PASS",
       senderSource: senderRoot,
       realHTTP: true,
-      checkoutOrders: 4,
+      checkoutOrders: 6,
+      guestBrowser: true,
       mixedOrderSingleAuthoritativeId: true,
       regularMenuExcludedFromDemand: true,
       staffReadMatchesAuthoritativeOrder: true,

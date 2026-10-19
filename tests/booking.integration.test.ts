@@ -135,9 +135,13 @@ describe("canonical reservation transactions", () => {
       ]),
     );
     expect(available.status).toBe(200);
-    expect(rooms.get("VIP2")?.fitsGuestCount).toBe(true);
-    expect(rooms.get("VIP3")?.fitsGuestCount).toBe(false);
-    expect((rooms.get("VIP3") as { available: boolean }).available).toBe(false);
+    // Public booking offers physical places once, while explicit legacy IDs stay compatible.
+    expect(rooms.has("VIP2")).toBe(false);
+    expect(rooms.has("VIP3")).toBe(false);
+    expect(rooms.get("01")?.fitsGuestCount).toBe(true);
+    expect(
+      available.data.resources.filter((r: { code: string }) => /^\d{2}$/.test(r.code)).length,
+    ).toBe(17);
 
     const key = randomToken();
     const selection = { ...window, guests: 8, resourceId: vip2, idempotencyKey: key };

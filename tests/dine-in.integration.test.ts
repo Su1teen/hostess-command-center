@@ -19,9 +19,10 @@ import { handleBookingApi } from "../src/server/guest/api";
 import { createQuote, checkout, changeStatus, type Owner } from "../src/server/dine-in/service";
 import { wallets, walletView, loyaltyLock, mergeDiningGuest } from "../src/server/dine-in/loyalty";
 import { drainOutbox } from "../src/server/dine-in/outbox";
-import { saveMenuItem } from "../src/server/dine-in/menu";
+import { saveMenuItem, batchMenuItems } from "../src/server/dine-in/menu";
 import { claimAccess, issueAccess } from "../src/server/dine-in/access";
 import { requestBooking, resolveBookingRequest } from "../src/server/dine-in/booking-requests";
+import { importMenu } from "../src/server/dine-in/menu-import";
 
 if (
   !process.env.TEST_DINING_DATABASE_URL?.includes("127.0.0.1") ||
@@ -47,6 +48,10 @@ const staff: Record<string, string> = {},
   delivered: string[] = [];
 let historicalOrderId: string;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  if (String(input).endsWith("/api/v1/command-center/products"))
+    return Response.json([
+      { id: productId, name: "Test drink", volumeMl: null, category: "Drinks" },
+    ]);
   if (String(input).endsWith("/api/v1/public/snapshot")) {
     if (unavailable) throw new Error("offline");
     return Response.json({
@@ -531,7 +536,7 @@ test("staff RBAC and exact origin are preserved", async () => {
         { cookie: staff.operator },
       )
     ).status,
-  ).toBe(403);
+  ).toBe(200);
   expect(
     (
       await api(
@@ -886,9 +891,9 @@ test("verified physical alias protects legacy, WhatsApp and normalized competing
     "UPDATE dining_sessions SET closed_at=now(),visit_status='released' WHERE resource_id=$1 AND closed_at IS NULL",
     [resource],
   );
-  await expect(
-    pool.query("UPDATE venue_resources SET is_reservable=true,capacity=6 WHERE id=$1", [resource]),
-  ).rejects.toMatchObject({ code: "23514" });
+  await pool.query("UPDATE venue_resources SET is_reservable=true,capacity=6 WHERE id=$1", [
+    resource,
+  ]);
   const config = { legacyCode: "A1", verified: true, reason: "Isolated fixture owner survey" };
   const path = "/api/staff/v1/tables/" + resource + "/mapping";
   expect((await api(path, config, { method: "PATCH", cookie: staff.operator })).status).toBe(403);
@@ -1620,4 +1625,296 @@ test("verified custom staff origins are explicit, exact and preserve the Railway
     if (previousAdditional === undefined) delete process.env.COMMAND_CENTER_ADDITIONAL_ORIGINS;
     else process.env.COMMAND_CENTER_ADDITIONAL_ORIGINS = previousAdditional;
   }
+});
+
+test("public table ordering needs neither QR nor code and isolates ownership, visit and cancellation", async () => {
+  const listing = await api("/api/guest/v1/dine-in/tables?venue=xoxo");
+  expect(listing.status).toBe(200);
+  const publicTables = await listing.json();
+  expect(publicTables.tables.length).toBe(17);
+  expect(JSON.stringify(publicTables).includes('"token"')).toBe(false);
+  const target = publicTables.tables.find((t: { code: string }) => t.code === "08");
+  const item = await dish();
+  const quoteResponse = await api("/api/guest/v1/dine-in/quotes", {
+    qrToken: `web_${target.resourceId}`,
+    items: [{ productId: item.id, quantity: 2, itemType: "REGULAR_MENU" }],
+  });
+  expect(quoteResponse.status).toBe(201);
+  const ownerCookie = quoteResponse.headers.get("set-cookie")!.split(";")[0];
+  const q = await quoteResponse.json();
+  const attempt = { quoteId: q.id, idempotencyKey: randomToken() };
+  const created = await api("/api/guest/v1/dine-in/orders", attempt, { cookie: ownerCookie });
+  expect(created.status).toBe(201);
+  const order = (await created.json()).order;
+  expect(order.source).toBe("web_app");
+  expect(order.status).toBe("new");
+  expect(order.guestId).toBe(undefined);
+  expect((await api(`/api/guest/v1/dine-in/orders/${order.id}`)).status).toBe(404);
+  expect((await api("/api/guest/v1/dine-in/orders", attempt, { cookie: ownerCookie })).status).toBe(
+    200,
+  );
+  const cancelled = await api(
+    `/api/staff/v1/dine-in/orders/${order.id}/cancel`,
+    { reason: "Гости не подтверждают заказ" },
+    { cookie: staff.operator },
+  );
+  expect(cancelled.status).toBe(200);
+  expect((await cancelled.json()).order.status).toBe("cancelled");
+  expect(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM dine_in_order_events WHERE order_id=$1 AND type='cancelled'",
+        [order.id],
+      )
+    ).rows[0].n,
+  ).toBe(1);
+  const stale = await api(
+    "/api/guest/v1/dine-in/quotes",
+    {
+      qrToken: `web_${target.resourceId}`,
+      items: [{ productId: item.id, quantity: 1, itemType: "REGULAR_MENU" }],
+    },
+    { cookie: ownerCookie },
+  );
+  const staleQuote = await stale.json();
+  await pool.query(
+    "UPDATE dining_sessions SET closed_at=clock_timestamp(),visit_status='released' WHERE id=$1",
+    [order.diningSessionId],
+  );
+  expect(
+    (
+      await api(
+        "/api/guest/v1/dine-in/orders",
+        { quoteId: staleQuote.id, idempotencyKey: randomToken() },
+        { cookie: ownerCookie },
+      )
+    ).status,
+  ).toBe(409);
+});
+
+test("operator cancellation is checked under the same lock as acceptance and payment", async () => {
+  const order = await submit(anon());
+  await changeStatus(order.order.id, venueId, "operator", "accepted");
+  expect(
+    (
+      await api(
+        `/api/staff/v1/dine-in/orders/${order.order.id}/cancel`,
+        { reason: "Requires manager" },
+        { cookie: staff.operator },
+      )
+    ).status,
+  ).toBe(403);
+  const unpaid = await submit(anon());
+  const results = await Promise.all([
+    api(
+      `/api/staff/v1/dine-in/orders/${unpaid.order.id}/cancel`,
+      { reason: "Concurrent test" },
+      { cookie: staff.operator },
+    ),
+    api(
+      `/api/staff/v1/dine-in/orders/${unpaid.order.id}/status`,
+      { manualPaymentReceived: true },
+      { cookie: staff.operator, method: "PATCH" },
+    ),
+  ]);
+  expect(results.every((r) => [200, 403].includes(r.status))).toBe(true);
+  const final = (
+    await pool.query("SELECT status,manual_payment_at FROM dine_in_orders WHERE id=$1", [
+      unpaid.order.id,
+    ])
+  ).rows[0];
+  expect(
+    final.status === "cancelled"
+      ? final.manual_payment_at === null
+      : final.manual_payment_at !== null,
+  ).toBe(true);
+});
+
+test("reviewed menu import is atomic, exact in tiyn, repeatable and rejects stale previews", async () => {
+  const priorMode = process.env.EXCHANGE_DATA_MODE;
+  process.env.EXCHANGE_DATA_MODE = "api";
+  try {
+    const item = {
+      ...dishInput,
+      name: "Imported official fixture",
+      sourceKey: "kamiqr:test-source",
+      sourceUrl: "https://ps-xoxo.kamiqr.com/menu/basic/list",
+      portion: "180 г",
+      priceMinor: 230050,
+    };
+    const input = {
+      mode: "preview",
+      items: [
+        item,
+        { ...item, name: "Test drink", sourceKey: "kamiqr:exchange-fixture", portion: "" },
+      ],
+    } as const;
+    const preview = await importMenu(venueId, managerSession, input);
+    expect(preview.counts).toMatchObject({ create: 1, exchange: 1 });
+    const apply = {
+      ...input,
+      mode: "apply",
+      previewToken: preview.previewToken,
+      idempotencyKey: randomToken(),
+    };
+    await importMenu(venueId, managerSession, apply);
+    await importMenu(venueId, managerSession, apply);
+    const saved = (
+      await pool.query(
+        "SELECT id,price_minor::text,version FROM venue_menu_items WHERE source_key=$1",
+        [item.sourceKey],
+      )
+    ).rows;
+    expect(saved.length).toBe(1);
+    expect(saved[0].price_minor).toBe("230050");
+    expect(saved[0].version).toBe(1);
+    expect((await importMenu(venueId, managerSession, input)).counts.unchanged).toBe(1);
+    const changed = { ...input, items: [{ ...item, priceMinor: 231050 }] };
+    const beforeEdit = await importMenu(venueId, managerSession, changed);
+    await saveMenuItem(
+      venueId,
+      managerSession,
+      { ...dishInput, name: item.name, priceMinor: 250000, portion: item.portion, version: 1 },
+      saved[0].id,
+    );
+    await expect(
+      importMenu(venueId, managerSession, {
+        ...changed,
+        mode: "apply",
+        previewToken: beforeEdit.previewToken,
+        idempotencyKey: randomToken(),
+      }),
+    ).rejects.toMatchObject({ code: "MENU_CHANGED" });
+    const forbidden = await api("/api/staff/v1/dine-in/menu-import", input, {
+      cookie: staff.operator,
+    });
+    expect(forbidden.status).toBe(403);
+  } finally {
+    if (priorMode === undefined) delete process.env.EXCHANGE_DATA_MODE;
+    else process.env.EXCHANGE_DATA_MODE = priorMode;
+  }
+});
+
+test("menu batch checks every version atomically and retry does not increment versions twice", async () => {
+  const a = await dish(),
+    b = await dish();
+  await saveMenuItem(
+    venueId,
+    managerSession,
+    { ...dishInput, name: "Concurrent menu edit", version: b.version },
+    b.id,
+  );
+  const stale = {
+    action: "stop",
+    items: [
+      { id: a.id, version: a.version },
+      { id: b.id, version: b.version },
+    ],
+    idempotencyKey: randomToken(),
+  };
+  await expect(batchMenuItems(venueId, managerSession, stale)).rejects.toMatchObject({
+    code: "MENU_CHANGED",
+  });
+  expect(
+    (await pool.query("SELECT is_available,version FROM venue_menu_items WHERE id=$1", [a.id]))
+      .rows[0],
+  ).toMatchObject({ is_available: true, version: a.version });
+  const valid = {
+    ...stale,
+    items: [
+      { id: a.id, version: a.version },
+      { id: b.id, version: b.version + 1 },
+    ],
+    idempotencyKey: randomToken(),
+  };
+  expect(await batchMenuItems(venueId, managerSession, valid)).toEqual({ updated: 2 });
+  expect(await batchMenuItems(venueId, managerSession, valid)).toEqual({ updated: 2 });
+  expect(
+    (await pool.query("SELECT is_available,version FROM venue_menu_items WHERE id=$1", [a.id]))
+      .rows[0],
+  ).toMatchObject({ is_available: false, version: a.version + 1 });
+  expect(
+    (await api("/api/staff/v1/dine-in/menu-items/batch", valid, { cookie: staff.operator })).status,
+  ).toBe(403);
+});
+
+test("a seated reservation preorder uses a fresh quote and two staff cannot execute it twice", async () => {
+  const item = await dish();
+  const resource = (
+    await pool.query(
+      "SELECT q.resource_id,q.token,r.code FROM table_qr_codes q JOIN venue_resources r ON r.id=q.resource_id WHERE r.code='16'",
+    )
+  ).rows[0];
+  const { reservationId, sessionId, preorderId } = await transaction(async (client) => {
+    const reservation = (
+      await client.query(
+        "INSERT INTO command_center_reservations(guest_name,phone,guests,starts_at,ends_at,table_id,table_ids,source,status) VALUES('Preorder fixture','',2,now()-interval '5 minutes',now()+interval '1 hour',$1,ARRAY[$1::text],'website','arrived') RETURNING id",
+        [resource.code],
+      )
+    ).rows[0];
+    await client.query(
+      "INSERT INTO command_center_reservation_resources(reservation_id,resource_id) VALUES($1,$2)",
+      [reservation.id, resource.resource_id],
+    );
+    const visit = (
+      await client.query(
+        "INSERT INTO dining_sessions(venue_id,resource_id,reservation_id,seated_at,visit_status) VALUES($1,$2,$3,clock_timestamp(),'seated') RETURNING id",
+        [venueId, resource.resource_id, reservation.id],
+      )
+    ).rows[0];
+    const preorder = (
+      await client.query(
+        "INSERT INTO command_center_reservation_preorders(reservation_id,product_id,product_name,quantity,unit_price,total,item_type) VALUES($1,$2,'Original estimate',2,1,2,'REGULAR_MENU') RETURNING id",
+        [reservation.id, item.id],
+      )
+    ).rows[0];
+    return { reservationId: reservation.id, sessionId: visit.id, preorderId: preorder.id };
+  });
+  const raw = {
+    qrToken: resource.token,
+    items: [{ productId: item.id, quantity: 2, itemType: "REGULAR_MENU" }],
+  };
+  const ownerA = { guestId: null, hash: hash("staff:preorder-a") },
+    ownerB = { guestId: null, hash: hash("staff:preorder-b") };
+  const first = await createQuote(ownerA, raw, {
+    actor: "staff:preorder-a",
+    sessionId,
+    preorderIds: [preorderId],
+  });
+  const second = await createQuote(ownerB, raw, {
+    actor: "staff:preorder-b",
+    sessionId,
+    preorderIds: [preorderId],
+  });
+  expect(first.payableMinor).toBe(dishInput.priceMinor * 2);
+  const results = await Promise.allSettled([
+    checkout(ownerA, { quoteId: first.id, idempotencyKey: randomToken() }, "staff:preorder-a"),
+    checkout(ownerB, { quoteId: second.id, idempotencyKey: randomToken() }, "staff:preorder-b"),
+  ]);
+  expect(results.filter((r) => r.status === "fulfilled").length).toBe(1);
+  const failed = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+  expect(failed.reason.code).toBe("PREORDER_CHANGED");
+  const planned = (
+    await pool.query(
+      "SELECT preorder_status,unit_price::text,execution_order_id FROM command_center_reservation_preorders WHERE id=$1",
+      [preorderId],
+    )
+  ).rows[0];
+  expect(planned.preorder_status).toBe("ordered");
+  expect(planned.unit_price).toBe("1.00");
+  expect(!!planned.execution_order_id).toBe(true);
+  expect(
+    (
+      await pool.query("SELECT count(*)::int AS n FROM dine_in_orders WHERE dining_session_id=$1", [
+        sessionId,
+      ])
+    ).rows[0].n,
+  ).toBe(1);
+  expect(
+    (
+      await pool.query("SELECT source FROM command_center_reservations WHERE id=$1", [
+        reservationId,
+      ])
+    ).rows[0].source,
+  ).toBe("website");
 });

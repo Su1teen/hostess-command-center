@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { BookingRequests } from "./BookingRequests";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useOperations, openStaffOrder } from "./ServiceOperations";
+import { useOperations, openStaffOrder, openOrder } from "./ServiceOperations";
 import {
   staffApi,
   useStaffRole,
@@ -146,7 +146,7 @@ export function ShiftScreen() {
               key={o.id}
               className={`rounded-2xl border bg-white p-4 ${o.status === "new" ? "border-amber-300" : "border-slate-200"}`}
             >
-              <a href={`/orders?order=${o.id}`} className="block">
+              <button onClick={() => openOrder(o.id)} className="block w-full text-left">
                 <h2 className="text-lg font-semibold">
                   Стол {o.tableCode} · {o.zoneName}
                 </h2>
@@ -162,7 +162,12 @@ export function ShiftScreen() {
                   <span>{o.manualPaymentAt ? "Оплата отмечена" : "К получению"}</span>
                   <span>{money(o.payableMinor)}</span>
                 </p>
-              </a>
+                {o.source === "web_app" && (
+                  <p className="mt-2 text-xs font-medium text-amber-800">
+                    Через сайт · подтвердите у гостей
+                  </p>
+                )}
+              </button>
               {canWrite && (
                 <div className="mt-4 grid gap-2">
                   {step && (
@@ -175,12 +180,12 @@ export function ShiftScreen() {
                     </button>
                   )}
                   {!o.manualPaymentAt && (
-                    <a
+                    <button
                       className={`${controlClass} content-center text-center`}
-                      href={`/orders?order=${o.id}`}
+                      onClick={() => openOrder(o.id)}
                     >
                       Проверить и отметить оплату
-                    </a>
+                    </button>
                   )}
                 </div>
               )}
@@ -193,14 +198,9 @@ export function ShiftScreen() {
           В этой очереди нет задач
         </p>
       )}
-      <div className="flex flex-wrap gap-3 text-sm underline">
-        <a href="/">Карта зала</a>
-        <a href="/?reservations=true">Бронирования</a>
-        <a href="/orders">Все заказы</a>
-        <a href="/tables/qr">Столы и QR</a>
-        <a href="/dashboard">Обзор</a>
-        <a href="/suppliers">Поставки</a>
-      </div>
+      <a className={`${controlClass} inline-flex items-center`} href="/?reservations=true">
+        Бронирования и прибытия
+      </a>
     </div>
   );
 }

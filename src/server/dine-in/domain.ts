@@ -4,7 +4,7 @@ import { ApiError } from "../guest/security";
 export const moneySchema = z.number().int().min(0).max(100_000_000_000);
 export const quoteInput = z
   .object({
-    qrToken: z.string().regex(/^[A-Za-z0-9_-]{43,64}$/),
+    qrToken: z.string().regex(/^(?:[A-Za-z0-9_-]{43,64}|web_[a-f0-9-]{36})$/),
     items: z
       .array(
         z

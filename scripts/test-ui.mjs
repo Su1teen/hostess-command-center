@@ -4,7 +4,7 @@ import { createServer } from "node:https";
 import { request as proxyRequest } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID, scryptSync } from "node:crypto";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 const raw = process.env.TEST_DATABASE_URL;
 if (!raw) throw new Error("TEST_DATABASE_URL required");
 const url = new URL(raw);
@@ -13,6 +13,10 @@ if (url.hostname !== "127.0.0.1" || url.username !== "hostess_test")
 const pool = new pg.Pool({ connectionString: raw, max: 1 }),
   schema = "hostess_test_ui_" + randomUUID().replaceAll("-", "");
 await pool.query("CREATE SCHEMA " + schema);
+// Keep newly opened pooled connections in this test schema after idle timeouts.
+pool.on("connect", (client) => {
+  void client.query(`SET search_path TO ${schema},public`);
+});
 const scoped = new URL(raw);
 scoped.searchParams.set("options", "-c search_path=" + schema + ",public");
 const key = "b".repeat(43),
@@ -41,6 +45,11 @@ const env = {
     {
       id: "manager",
       role: "manager",
+      passwordHash: salt + ":" + scryptSync(password, salt, 64).toString("hex"),
+    },
+    {
+      id: "operator",
+      role: "operator",
       passwordHash: salt + ":" + scryptSync(password, salt, 64).toString("hex"),
     },
   ]),
@@ -73,6 +82,12 @@ const exchange = createServer(
   },
   (req, res) => {
     res.setHeader("content-type", "application/json");
+    if (req.url === "/api/v1/command-center/products") {
+      res.end(
+        JSON.stringify([{ id: productId, name: "UI Drink", volumeMl: null, category: "Drinks" }]),
+      );
+      return;
+    }
     if (req.url === "/api/v1/command-center/order-events") {
       let body = "";
       req.on("data", (chunk) => {
@@ -216,7 +231,7 @@ try {
   await page.reload();
   await page.getByText("№" + order.number + " · Стол " + order.tableCode, { exact: true }).click();
   await page.getByRole("button", { name: "Готовится", exact: true }).waitFor();
-  for (const width of [360, 390, 430, 768, 1440]) {
+  for (const width of [320, 375, 390, 430, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     assert(
       (await page.getByRole("dialog").getByText("UI Kitchen", { exact: false }).count()) > 0,
@@ -248,7 +263,7 @@ try {
   await menuDrawer.waitFor({ state: "hidden" });
   await page.reload();
   await page.getByRole("heading", { name: "UI Persisted Dish", exact: true }).waitFor();
-  for (const width of [360, 390, 430, 768, 1440]) {
+  for (const width of [320, 375, 390, 430, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     assert(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -267,9 +282,58 @@ try {
     ),
     "Published menu did not reach guest API",
   );
-  console.log(
-    "PASS real persisted menu publish/reload and guest price parity at 360/390/430/768/1440",
+  console.log("PASS real persisted menu publish/reload and guest price parity at all seven widths");
+  const official = JSON.parse(await readFile("docs/menu/official-menu.json", "utf8"));
+  official.items = official.items.map((item) => ({
+    ...item,
+    imageUrl: item.imageUrl
+      ? "https://localhost:3443/menu/kami/" + new URL(item.imageUrl).pathname.split("/").at(-1)
+      : item.imageUrl,
+  }));
+  await writeFile("test-results/menu-import-ui.json", JSON.stringify(official));
+  await page.getByText("Импорт меню", { exact: true }).click();
+  await page.getByLabel("Файл импорта меню").setInputFiles("test-results/menu-import-ui.json");
+  await page
+    .getByRole("button", { name: "Предварительный просмотр · 119 позиций", exact: true })
+    .click();
+  await page.getByText("Новые: 119", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Применить проверенные изменения", exact: true }).click();
+  await page
+    .getByText("Импорт сохранён. Каталог доступен гостям и сотрудникам.", { exact: true })
+    .waitFor();
+  assert(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM venue_menu_items WHERE source_key IS NOT NULL",
+      )
+    ).rows[0].n === 119,
+    "Official menu UI import incomplete",
   );
+  await page.getByText("Импорт меню", { exact: true }).click();
+  await page.getByLabel("Поиск по меню", { exact: true }).fill("UI Persisted Dish");
+  await page.getByRole("button", { name: "Выбрать показанные", exact: true }).click();
+  await page.getByRole("button", { name: "В стоп-лист", exact: true }).click();
+  await page.getByRole("button", { name: "Выбрать показанные", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Выбрать показанные", exact: true }).click();
+  await page.getByRole("button", { name: "Вернуть в меню", exact: true }).click();
+  await page.getByRole("button", { name: "Выбрать показанные", exact: true }).waitFor();
+  await page.getByText("Быстрые изменения", { exact: true }).click();
+  await page.getByLabel("Цена UI Persisted Dish 180 г", { exact: true }).fill("2310.50");
+  await page.getByRole("button", { name: "Сохранить цену", exact: true }).click();
+  for (let i = 0; i < 40; i++) {
+    const price = (
+      await pool.query(
+        "SELECT price_minor::text AS price FROM venue_menu_items WHERE name='UI Persisted Dish'",
+      )
+    ).rows[0].price;
+    if (price === "231050") break;
+    if (i === 39) throw new Error("Inline price not saved");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  await page.getByLabel("Поиск по меню", { exact: true }).fill(official.items[0].name);
+  await page.getByRole("heading", { name: official.items[0].name, exact: true }).first().waitFor();
+  await page.screenshot({ path: "test-results/menu-official-import-mobile.png", fullPage: true });
+  console.log("PASS full 119-item menu import through UI, bulk stop/restore and inline price");
   await page.goto("https://localhost:3443/guests");
   await page.getByLabel("Имя гостя", { exact: true }).fill("UI Guest");
   await page.getByLabel("Телефон гостя", { exact: true }).fill("87015558899");
@@ -339,7 +403,7 @@ try {
   await page
     .locator("article")
     .first()
-    .getByText("Бронирование недоступно", { exact: true })
+    .getByText("Бронирование доступно", { exact: true })
     .waitFor();
   await page
     .locator("article")
@@ -487,7 +551,7 @@ try {
     .getByRole("button", { name: /Первый зал/ })
     .click();
   await page.getByRole("button", { name: /Стол 01 · у окна:/ }).click();
-  await page.getByText("QR-активность · посадка не подтверждена", { exact: true }).waitFor();
+  await page.getByText("Заказы за столом · посадка не подтверждена", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Посадить гостей", exact: true }).click();
   await page.getByRole("button", { name: "Подтвердить посадку", exact: true }).click();
   await page.getByRole("button", { name: "Завершить визит", exact: true }).waitFor();
@@ -511,6 +575,7 @@ try {
   const composer = page
     .getByRole("dialog")
     .filter({ has: page.getByRole("heading", { name: "Создать заказ", exact: true }) });
+  await composer.getByText("Код для гостя", { exact: true }).click();
   await composer.getByRole("button", { name: "Выдать код гостю без QR", exact: true }).click();
   await composer.getByText(/для одного телефона/).waitFor();
   await composer.getByRole("button", { name: "Добавить UI Kitchen", exact: true }).click();
@@ -527,8 +592,18 @@ try {
     await page.screenshot({ path: `test-results/staff-composer-${width}.png`, fullPage: false });
   }
   await composer.getByRole("button", { name: "Подтвердить заказ", exact: true }).click();
+  await composer.getByRole("heading", { name: /Заказ №\d+ создан/ }).waitFor();
+  assert(new URL(page.url()).pathname === "/", "Staff checkout lost floor context");
+  await composer
+    .getByRole("button", { name: "Принять в работу / отметить оплату", exact: true })
+    .click();
   await page.getByRole("heading", { name: "Карточка заказа", exact: true }).waitFor();
   await page.getByText("Оформлен сотрудником", { exact: true }).waitFor();
+  const orderPanel = page
+    .getByRole("dialog")
+    .filter({ has: page.getByRole("heading", { name: "Карточка заказа", exact: true }) });
+  await orderPanel.getByRole("button", { name: "Оплата получена", exact: true }).click();
+  await orderPanel.getByText(/Сотрудник отметил оплату:/).waitFor();
   await page.goto("https://localhost:3443/shift");
   await page.getByRole("heading", { name: "Смена", exact: true }).waitFor();
   await page.screenshot({ path: "test-results/service-shift-desktop.png", fullPage: true });
@@ -658,7 +733,68 @@ try {
   await touch.detach();
   console.log("PASS real two-touch pinch zoom and vertical page gesture policy");
 
-  for (const width of [320, 375, 390, 768, 1024, 1440]) {
+  const pending = (
+    await pool.query(
+      "SELECT q.resource_id FROM table_qr_codes q JOIN venue_resources r ON r.id=q.resource_id WHERE r.code='03'",
+    )
+  ).rows[0];
+  await pool.query(
+    "UPDATE venue_resource_mappings SET relationship='pending',verified_at=NULL,verified_by=NULL,note='' WHERE resource_id=$1",
+    [pending.resource_id],
+  );
+  await pool.query("UPDATE venue_resources SET capacity=NULL,is_reservable=true WHERE id=$1", [
+    pending.resource_id,
+  ]);
+  await pool.query("UPDATE table_qr_codes SET enabled=false WHERE resource_id=$1", [
+    pending.resource_id,
+  ]);
+  await page.goto("https://localhost:3443/shift");
+  await page.getByRole("button", { name: "Создать заказ", exact: true }).click();
+  await page
+    .getByLabel("Стол для заказа", { exact: true })
+    .selectOption("seat:" + pending.resource_id);
+  await page.getByRole("button", { name: "Подтвердить посадку и продолжить", exact: true }).click();
+  await page.getByRole("button", { name: "Добавить UI Kitchen", exact: true }).click();
+  await page.getByRole("button", { name: "Проверить цену", exact: true }).click();
+  await page.getByRole("button", { name: "Подтвердить заказ", exact: true }).click();
+  await page.getByRole("heading", { name: /Заказ №\d+ создан/ }).waitFor();
+  await page.getByRole("button", { name: /Новый заказ №.*Стол 03/ }).waitFor();
+  await page.screenshot({ path: "test-results/staff-inline-seating-mobile.png", fullPage: false });
+  const mistaken = (
+    await pool.query(
+      "SELECT id,number FROM dine_in_orders WHERE table_resource_id=$1 ORDER BY accepted_at DESC LIMIT 1",
+      [pending.resource_id],
+    )
+  ).rows[0];
+  const workerContext = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      ignoreHTTPSErrors: true,
+    }),
+    worker = await workerContext.newPage();
+  await worker.goto("https://localhost:3443/orders?order=" + mistaken.id);
+  await worker.locator('input[autocomplete="username"]').fill("operator");
+  await worker.locator('input[autocomplete="current-password"]').fill(password);
+  await worker.locator("form").getByRole("button").click();
+  await worker
+    .getByLabel("Причина отмены", { exact: true })
+    .fill("Ошибочно выбран стол в тесте интерфейса");
+  await worker.getByRole("button", { name: "Отменить заказ", exact: true }).click();
+  await worker
+    .getByRole("dialog")
+    .getByText(/· Отменён$/)
+    .waitFor();
+  assert(
+    (await pool.query("SELECT status FROM dine_in_orders WHERE id=$1", [mistaken.id])).rows[0]
+      .status === "cancelled",
+    "Operator cancellation not persisted",
+  );
+  await worker.screenshot({ path: "test-results/worker-cancel-new-mobile.png", fullPage: false });
+  await workerContext.close();
+  console.log(
+    "PASS inline seating with unknown capacity/pending mapping/QR disabled and operator unpaid NEW cancellation",
+  );
+
+  for (const width of [320, 375, 390, 430, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     for (const route of ["/tables/qr", "/"]) {
       await page.goto("https://localhost:3443" + route);
@@ -735,8 +871,14 @@ try {
   await safari.keyboard.press("Escape");
   await safari.getByRole("dialog").waitFor({ state: "hidden" });
   await safari.goto("https://localhost:3443/menu");
+  await safari.getByLabel("Поиск по меню", { exact: true }).fill("UI Persisted Dish");
   await safari.getByRole("heading", { name: "UI Persisted Dish", exact: true }).waitFor();
-  await safari.screenshot({ path: "test-results/menu-webkit-375.png", fullPage: true });
+  await safari.getByRole("button", { name: "Показать списком", exact: true }).click();
+  assert(
+    await safari.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+    "WebKit compact menu overflow",
+  );
+  await safari.screenshot({ path: "test-results/menu-webkit-375.png", fullPage: false });
   await safari.goto(`https://localhost:3443/orders?order=${order.id}`);
   await safari.getByRole("dialog").getByText("UI Kitchen", { exact: false }).waitFor();
   await safari.screenshot({ path: "test-results/order-webkit-375.png", fullPage: true });
@@ -757,7 +899,7 @@ try {
   await webkitBrowser.close();
   webkitBrowser = undefined;
   console.log(
-    "PASS Chromium 320/375/390/768/1024/1440, WebKit375, dialogs keyboard and screenshots",
+    "PASS Chromium 320/375/390/430/768/1024/1440, WebKit375, dialogs keyboard and screenshots",
   );
 
   // Restart with persisted backlog and no incoming HTTP request: the worker must start itself.

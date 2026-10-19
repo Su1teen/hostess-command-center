@@ -27,7 +27,8 @@ import {
 import { normalizePhone, statusNames, toMinor } from "./domain";
 import { ledger, loyaltyLock, walletView } from "./loyalty";
 import { printPanels, qrPng, qrSvg, zipFiles } from "./qr";
-import { menuCatalog, saveMenuItem, occupancySignals } from "./menu";
+import { menuCatalog, saveMenuItem, occupancySignals, batchMenuItems } from "./menu";
+import { importMenu } from "./menu-import";
 import {
   listRegistry,
   bookingTargets,
@@ -227,7 +228,23 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         const v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
         return json(await menuCatalog(v.id, v.slug));
       }
-      const tableMatch = /^\/dine-in\/tables\/([A-Za-z0-9_-]{43,64})$/.exec(path);
+      if (path === "/dine-in/tables" && method === "GET") {
+        const v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
+        const tables = (
+          await pool.query(
+            `SELECT r.id AS "resourceId",r.code,r.name,z.name AS "zoneName",z.id AS "zoneId"
+           FROM table_qr_codes q JOIN venue_resources r ON r.id=q.resource_id
+           JOIN venue_zones z ON z.id=r.zone_id WHERE q.venue_id=$1
+             AND r.status='active' AND z.is_active ORDER BY z.display_order,r.code`,
+            [v.id],
+          )
+        ).rows;
+        return json({
+          venue: { id: v.id, slug: v.slug, name: v.display_name, currency: "KZT" },
+          tables,
+        });
+      }
+      const tableMatch = /^\/dine-in\/tables\/([A-Za-z0-9_-]{40,64})$/.exec(path);
       if (tableMatch && method === "GET") {
         const token = tableMatch[1].startsWith("visit_")
           ? (await accessTable(tableMatch[1], (await getOwner(request)).owner)).token
@@ -342,8 +359,8 @@ export async function handleDiningApi(request: Request): Promise<Response | null
       const write = method !== "GET",
         isSensitive =
           (write && path.startsWith("/dine-in/menu-items")) ||
+          (write && path === "/dine-in/menu-import") ||
           /\/qr\/rotate$/.test(path) ||
-          /\/cancel$/.test(path) ||
           path === "/tables/qr/bootstrap" ||
           path === "/tables/qr/bulk" ||
           path === "/dine-in/outbox/retry" ||
@@ -401,6 +418,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         const input = z
           .object({
             sessionId: uuid,
+            preorderIds: z.array(uuid).max(100).default([]),
             items: z.array(z.unknown()).min(1).max(30),
             useVisitGuest: z.boolean().default(false),
             redeemMinor: z.number().int().min(0).max(100_000_000_000).default(0),
@@ -434,7 +452,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
               items: input.items,
               redeemMinor: input.redeemMinor,
             },
-            { actor, sessionId: input.sessionId },
+            { actor, sessionId: input.sessionId, preorderIds: input.preorderIds },
           ),
           201,
         );
@@ -459,13 +477,16 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         );
       }
       if (path === "/dine-in/staff-context" && method === "GET") {
-        const guest = await verifiedVisitGuest(
-          pool,
-          v.id,
-          uuid.parse(url.searchParams.get("sessionId")),
-        );
+        const sessionId = uuid.parse(url.searchParams.get("sessionId"));
+        const guest = await verifiedVisitGuest(pool, v.id, sessionId);
         return json({
           guest,
+          preorders: (
+            await pool.query(
+              `SELECT p.id,p.product_id AS "productId",p.product_name AS name,p.quantity,p.item_type AS "itemType" FROM command_center_reservation_preorders p JOIN dining_sessions s ON s.reservation_id=p.reservation_id WHERE s.id=$1 AND s.venue_id=$2 AND s.closed_at IS NULL AND s.seated_at IS NOT NULL AND p.preorder_status='pending' ORDER BY p.id`,
+              [sessionId, v.id],
+            )
+          ).rows,
           wallet: guest
             ? await transaction(async (client) => {
                 await loyaltyLock(client);
@@ -476,6 +497,10 @@ export async function handleDiningApi(request: Request): Promise<Response | null
       }
       if (path === "/dine-in/menu-items" && method === "GET")
         return json(await menuCatalog(v.id, v.slug, true));
+      if (path === "/dine-in/menu-import" && method === "POST")
+        return json(await importMenu(v.id, staff, await body(request, 2_000_000)));
+      if (path === "/dine-in/menu-items/batch" && method === "POST")
+        return json(await batchMenuItems(v.id, staff, await body(request, 100_000)));
       if (path === "/dine-in/menu-items" && method === "POST")
         return json({ item: await saveMenuItem(v.id, staff, await body(request)) }, 201);
       const menuMatch = /^\/dine-in\/menu-items\/([a-f0-9-]{36})$/.exec(path);
@@ -731,7 +756,16 @@ export async function handleDiningApi(request: Request): Promise<Response | null
             .strict()
             .parse(await body(request));
           return json({
-            order: await changeStatus(id, v.id, staff.staff_id!, undefined, input.reason),
+            order: await changeStatus(
+              id,
+              v.id,
+              staff.staff_id!,
+              undefined,
+              input.reason,
+              undefined,
+              undefined,
+              staff.role ?? "viewer",
+            ),
           });
         }
         if (orderMatch[2] === "status" && method === "PATCH") {

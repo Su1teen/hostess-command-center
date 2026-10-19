@@ -45,7 +45,7 @@ export const statusLabels = {
 export type DineOrder = {
   id: string;
   number: string;
-  source?: "staff" | "qr" | "table_code";
+  source?: "staff" | "qr" | "table_code" | "web_app";
   diningSessionId?: string;
   tableResourceId?: string;
   tableCode: string;

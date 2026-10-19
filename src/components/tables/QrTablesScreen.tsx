@@ -609,7 +609,7 @@ export function QrTablesScreen() {
                         linkedResourceId: null,
                         legacyCode: null,
                         verified: false,
-                        bookable: false,
+                        bookable: draft.bookable,
                       });
                     }}
                   >
@@ -673,7 +673,7 @@ export function QrTablesScreen() {
                           setDraft({
                             ...draft,
                             verified: e.target.checked,
-                            bookable: e.target.checked && draft.bookable,
+                            bookable: draft.bookable,
                           })
                         }
                         className="size-4 accent-slate-900"
@@ -696,12 +696,7 @@ export function QrTablesScreen() {
                 )}
                 <label className="flex min-h-11 items-center gap-3 text-sm">
                   <input
-                    disabled={
-                      !manager ||
-                      !draft.verified ||
-                      !draft.capacity ||
-                      draft.relationship === "pending"
-                    }
+                    disabled={!manager}
                     type="checkbox"
                     checked={draft.bookable}
                     onChange={(e) => setDraft({ ...draft, bookable: e.target.checked })}
@@ -712,9 +707,7 @@ export function QrTablesScreen() {
                 <p className="rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">
                   {draft.relationship === "linked"
                     ? "Связанные записи учитываются как одно физическое место. Подтвердите совпадение зоны, типа и вместимости."
-                    : !draft.verified || !draft.capacity
-                      ? "Для бронирования укажите вместимость и подтвердите реальное расположение. QR-заказы доступны независимо."
-                      : "Физическое место подтверждено. База проверит конфликты при сохранении."}
+                    : "Бронирование работает независимо от отметки проверки. Если вместимость не указана, ограничение по числу мест не применяется. Реальные пересечения проверяет база."}
                 </p>
               </details>
               <details className="border-t border-slate-100 pt-4">
