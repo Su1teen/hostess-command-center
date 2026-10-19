@@ -12,7 +12,7 @@ export async function guestBrowserCheckout(input: {
   senderOrigin: string;
   exchangeOrigin: string;
   productName: string;
-  onCreated: (id: string) => Promise<void>;
+  onCreated: (id: string, registered: boolean) => Promise<void>;
 }) {
   mkdirSync("test-results", { recursive: true });
   const keyPath = resolve("test-results/cross-key.pem"),
@@ -100,36 +100,79 @@ export async function guestBrowserCheckout(input: {
     await page.getByRole("button", { name: /^Стол 01 / }).click();
     await page.getByRole("button", { name: "Продолжить как гость", exact: true }).click();
     await page.getByText("Стол №01", { exact: true }).waitFor();
-    await page.getByRole("button", { name: /XOXO MARKET Биржа напитков/ }).click();
-    await page.getByRole("button", { name: `Добавить ${input.productName}`, exact: true }).click();
-    await page.getByRole("button", { name: /Корзина · 1/ }).click();
-    const cart = page
-      .getByRole("dialog")
-      .filter({ has: page.getByRole("heading", { name: "Стол №01 · XOXO", exact: true }) });
-    await cart.getByRole("button", { name: "Проверить сумму", exact: true }).click();
-    await cart.getByRole("button", { name: /^Заказать ·/ }).waitFor();
-    const response = page.waitForResponse(
-      (r) =>
-        r.request().method() === "POST" &&
-        new URL(r.url()).pathname === "/api/guest/v1/dine-in/orders",
-    );
-    await cart.getByRole("button", { name: /^Заказать ·/ }).click();
-    const accepted = await response;
-    assert.equal(accepted.status(), 201, await accepted.text());
-    const order = (await accepted.json()).order;
-    assert.equal(order.source, "web_app");
-    assert.equal(order.status, "new");
-    await cart.getByRole("button", { name: "Заказать ещё", exact: true }).waitFor();
-    await input.onCreated(order.id);
-    await cart.getByText("Принят сотрудником", { exact: true }).waitFor();
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    await page.screenshot({ path: "test-results/cross-web-order-mobile.png", fullPage: true });
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.screenshot({ path: "test-results/cross-web-order-desktop.png", fullPage: true });
-    console.log(
-      "PASS real Hostess UI → its BFF → Command Center → PostgreSQL; anonymous web checkout and receipt status polling",
-    );
-    return order as { id: string; source: string };
+    const created: { id: string; source: string }[] = [];
+    for (const registered of [false, true]) {
+      if (registered) {
+        await page
+          .locator("main")
+          .getByRole("button", { name: "Мой кабинет", exact: true })
+          .click();
+        const account = page
+          .getByRole("dialog")
+          .filter({ has: page.getByRole("heading", { name: "Гостевой аккаунт", exact: true }) });
+        await page.waitForTimeout(750);
+        assert.ok(
+          await account.evaluate((el) => {
+            const r = el.getBoundingClientRect();
+            return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+          }),
+          "Guest account covered after animation",
+        );
+        await account.getByLabel("Имя", { exact: true }).fill("Browser registered guest");
+        await account.getByLabel("Телефон", { exact: true }).fill("+77015551234");
+        await account.getByRole("checkbox").check();
+        await account.getByRole("button", { name: "Продолжить с бонусами", exact: true }).click();
+        await account.getByText("Browser registered guest", { exact: true }).first().waitFor();
+        await account.getByRole("button", { name: "Close", exact: true }).click();
+      }
+      await page.getByRole("button", { name: /XOXO MARKET Биржа напитков/ }).click();
+      await page
+        .getByRole("button", { name: `Добавить ${input.productName}`, exact: true })
+        .click();
+      await page.getByRole("button", { name: "На главную XOXO", exact: true }).click();
+      await page.getByRole("button", { name: /Корзина · 1/ }).click();
+      const cart = page
+        .getByRole("dialog")
+        .filter({ has: page.getByRole("heading", { name: "Стол №01 · XOXO", exact: true }) });
+      await page.waitForTimeout(750);
+      assert.ok(
+        await cart.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+        }),
+        "Cart covered after animation",
+      );
+      await cart.getByRole("button", { name: "Проверить сумму", exact: true }).click();
+      await cart.getByRole("button", { name: /^Заказать ·/ }).waitFor();
+      const response = page.waitForResponse(
+        (r) =>
+          r.request().method() === "POST" &&
+          new URL(r.url()).pathname === "/api/guest/v1/dine-in/orders",
+      );
+      await cart.getByRole("button", { name: /^Заказать ·/ }).click();
+      const accepted = await response;
+      assert.equal(accepted.status(), 201, await accepted.text());
+      const order = (await accepted.json()).order;
+      assert.equal(order.source, "web_app");
+      assert.equal(order.status, "new");
+      await cart.getByRole("button", { name: "Заказать ещё", exact: true }).waitFor();
+      await input.onCreated(order.id, registered);
+      await cart.getByText("Принят сотрудником", { exact: true }).waitFor();
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      await page.screenshot({
+        path: `test-results/cross-web-order-${registered ? "registered" : "anonymous"}.png`,
+        fullPage: false,
+      });
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.screenshot({ path: "test-results/cross-web-order-desktop.png", fullPage: true });
+      console.log(
+        "PASS real Hostess UI → its BFF → Command Center → PostgreSQL; anonymous web checkout and receipt status polling",
+      );
+      created.push(order);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await cart.getByRole("button", { name: "Заказать ещё", exact: true }).click();
+    }
+    return created;
   } catch (error) {
     if (activePage) {
       console.error((await activePage.locator("body").innerText()).slice(-5000));

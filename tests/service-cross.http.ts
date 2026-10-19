@@ -481,28 +481,46 @@ try {
       senderOrigin,
       exchangeOrigin: process.env.EXCHANGE_API_ORIGIN!,
       productName: product.name,
-      onCreated: async (id) => {
+      onCreated: async (id, registered) => {
+        const saved = (
+          await pool.query(
+            "SELECT table_resource_id,payable_minor,guest_id FROM dine_in_orders WHERE id=$1",
+            [id],
+          )
+        ).rows[0];
+        assert.equal(saved.table_resource_id, table.resource_id);
+        assert.equal(!!saved.guest_id, registered);
+        for (const endpoint of ["/dine-in/orders", "/dine-in/operations"]) {
+          const response = await fetch(senderOrigin + "/api/staff/v1" + endpoint, {
+            headers: { cookie: staffCookie },
+          });
+          assert.equal(response.status, 200);
+          const visible = (await response.json()).orders.find((o: { id: string }) => o.id === id);
+          assert.ok(visible, "Guest order missing from Command Center");
+          assert.equal(String(visible.payableMinor), String(saved.payable_minor));
+          assert.equal(visible.tableCode, "01");
+        }
         await changeStatus(id, table.venue_id, "cross-operator", "accepted");
       },
     });
-    assert.equal(
-      (
-        await pool.query("SELECT dining_session_id FROM dine_in_orders WHERE id=$1", [
-          browserOrder.id,
-        ])
-      ).rows[0].dining_session_id,
-      visit.id,
-    );
-    assert.deepEqual(await drainOutbox(), { delivered: 1, failed: 0 });
-    await changeStatus(
-      browserOrder.id,
-      table.venue_id,
-      "cross-manager",
-      undefined,
-      "Controlled browser test compensation",
-    );
-    assert.deepEqual(await drainOutbox(), { delivered: 1, failed: 0 });
-    assert.equal(await prisma.exchangeOrderEvent.count(), 12);
+    for (const one of browserOrder) {
+      assert.equal(
+        (await pool.query("SELECT dining_session_id FROM dine_in_orders WHERE id=$1", [one.id]))
+          .rows[0].dining_session_id,
+        visit.id,
+      );
+    }
+    assert.deepEqual(await drainOutbox(), { delivered: 2, failed: 0 });
+    for (const one of browserOrder)
+      await changeStatus(
+        one.id,
+        table.venue_id,
+        "cross-manager",
+        undefined,
+        "Controlled browser test compensation",
+      );
+    assert.deepEqual(await drainOutbox(), { delivered: 2, failed: 0 });
+    assert.equal(await prisma.exchangeOrderEvent.count(), 14);
     console.log(
       "PASS actual Hostess BFF HTTP -> Command Center staff/no-QR checkout -> PostgreSQL -> XOXO outbox; status roundtrip; single visit; no manual sales",
     );
@@ -516,7 +534,7 @@ try {
       result: "PASS",
       senderSource: senderRoot,
       realHTTP: true,
-      checkoutOrders: 6,
+      checkoutOrders: 7,
       guestBrowser: true,
       mixedOrderSingleAuthoritativeId: true,
       regularMenuExcludedFromDemand: true,

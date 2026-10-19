@@ -189,7 +189,7 @@ try {
       "x-hostess-client-id": "ui-fixture",
     },
     body: JSON.stringify({
-      qrToken: table.token,
+      qrToken: "web_" + table.id,
       items: [
         { productId, quantity: 3 },
         { productId: menuItem.id, quantity: 1, itemType: "REGULAR_MENU" },
@@ -226,6 +226,9 @@ try {
   await page.locator("form").getByRole("button").click();
   await page.getByRole("heading", { name: "Заказы", exact: true }).waitFor();
   await page.getByText("№" + order.number + " · Стол " + order.tableCode, { exact: true }).click();
+  await page
+    .getByText("Заказ через сайт · проверьте у гостей за столом", { exact: true })
+    .waitFor();
   await page.getByRole("button", { name: "Принят", exact: true }).click();
   await page.getByRole("button", { name: "Готовится", exact: true }).waitFor();
   await page.reload();
@@ -771,7 +774,9 @@ try {
       ignoreHTTPSErrors: true,
     }),
     worker = await workerContext.newPage();
-  await worker.goto("https://localhost:3443/orders?order=" + mistaken.id);
+  await worker.goto("https://localhost:3443/orders?order=" + mistaken.id, {
+    waitUntil: "domcontentloaded",
+  });
   await worker.locator('input[autocomplete="username"]').fill("operator");
   await worker.locator('input[autocomplete="current-password"]').fill(password);
   await worker.locator("form").getByRole("button").click();
