@@ -504,6 +504,42 @@ try {
     "Previous company's order leaked into current folio",
   );
   await page.screenshot({ path: "test-results/floor-mobile-folio.png", fullPage: true });
+  await page
+    .getByRole("region", { name: "Фолио визита", exact: true })
+    .getByRole("button", { name: "Создать заказ", exact: true })
+    .click();
+  const composer = page
+    .getByRole("dialog")
+    .filter({ has: page.getByRole("heading", { name: "Создать заказ", exact: true }) });
+  await composer.getByRole("button", { name: "Выдать код гостю без QR", exact: true }).click();
+  await composer.getByText(/для одного телефона/).waitFor();
+  await composer.getByRole("button", { name: "Добавить UI Kitchen", exact: true }).click();
+  await composer.getByRole("button", { name: "Биржа", exact: true }).click();
+  await composer.getByRole("button", { name: "Добавить UI Drink", exact: true }).click();
+  await composer.getByRole("button", { name: "Проверить цену", exact: true }).click();
+  await composer.getByRole("button", { name: "Подтвердить заказ", exact: true }).waitFor();
+  for (const width of [320, 375, 390, 430, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert(
+      await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      "Composer horizontal overflow",
+    );
+    await page.screenshot({ path: `test-results/staff-composer-${width}.png`, fullPage: false });
+  }
+  await composer.getByRole("button", { name: "Подтвердить заказ", exact: true }).click();
+  await page.getByRole("heading", { name: "Карточка заказа", exact: true }).waitFor();
+  await page.getByText("Оформлен сотрудником", { exact: true }).waitFor();
+  await page.goto("https://localhost:3443/shift");
+  await page.getByRole("heading", { name: "Смена", exact: true }).waitFor();
+  await page.screenshot({ path: "test-results/service-shift-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: "test-results/service-shift-mobile.png", fullPage: true });
+  await page.goto("https://localhost:3443/");
+  await page
+    .getByRole("navigation", { name: "Зоны зала" })
+    .getByRole("button", { name: /Первый зал/ })
+    .click();
+  await page.getByRole("button", { name: /Стол 01 · у окна:/ }).click();
   await page.getByRole("button", { name: "Завершить визит", exact: true }).click();
   await page
     .getByLabel("Комментарий к завершению", { exact: true })
@@ -514,7 +550,10 @@ try {
   await page.getByRole("button", { name: "На время", exact: true }).click();
   const futureDate = new Date(Date.now() + 86400000 + 5 * 3600000).toISOString().slice(0, 10);
   await page.getByLabel("Дата карты", { exact: true }).fill(futureDate);
-  await page.getByLabel("Время карты", { exact: true }).fill("17:00");
+  await page.getByRole("spinbutton", { name: "Часы", exact: true }).press("Home");
+  for (let i = 0; i < 17; i++)
+    await page.getByRole("spinbutton", { name: "Часы", exact: true }).press("ArrowDown");
+  await page.getByRole("spinbutton", { name: "Минуты", exact: true }).press("Home");
   await page.getByRole("button", { name: /Стол 01 · у окна:/ }).click();
   await page.getByRole("button", { name: "Создать бронь", exact: true }).click();
   await page.getByLabel("Имя гостя", { exact: true }).fill("Бронь на 17:00");
@@ -533,7 +572,10 @@ try {
     source: "whatsapp",
     idempotencyKey: randomUUID(),
   });
-  await page.getByLabel("Время карты", { exact: true }).fill("19:00");
+  await page.getByRole("spinbutton", { name: "Часы", exact: true }).press("Home");
+  for (let i = 0; i < 19; i++)
+    await page.getByRole("spinbutton", { name: "Часы", exact: true }).press("ArrowDown");
+  await page.getByRole("spinbutton", { name: "Минуты", exact: true }).press("Home");
   await page.getByRole("button", { name: /Стол 01 · у окна:/ }).click();
   await page
     .getByRole("dialog")
@@ -603,10 +645,16 @@ try {
     beforePinch,
   );
   assert(
-    (await mapHost.evaluate((node) => getComputedStyle(node).touchAction)) === "pan-y",
-    "Map blocks normal vertical touch scrolling",
+    (await mapHost.evaluate((node) => getComputedStyle(node).touchAction)) === "none",
+    "Zoomed map must allow deliberate canvas panning",
   );
   await page.getByRole("button", { name: "Показать всю карту", exact: true }).click();
+  await page.waitForFunction(
+    () =>
+      getComputedStyle(
+        document.querySelector('svg[aria-label="Столы выбранной зоны"]').parentElement,
+      ).touchAction === "pan-y",
+  );
   await touch.detach();
   console.log("PASS real two-touch pinch zoom and vertical page gesture policy");
 

@@ -16,8 +16,27 @@ import {
 import { earn, redeem, walletView, loyaltyLock, reverseLoyalty } from "./loyalty";
 import { acquireDiningSession, floorLock } from "../floor/lifecycle";
 import { regularPriceLines, validateRegularQuote } from "./menu";
+import { accessTable } from "./access";
 
 export type Owner = { guestId: string | null; hash: string };
+/** Staff may use only the verified identity already bound through this visit's
+ * canonical reservation. A typed phone or arbitrary session guest is insufficient. */
+export async function verifiedVisitGuest(
+  client: Pick<PoolClient, "query">,
+  venueId: string,
+  sessionId: string,
+) {
+  return (
+    await client.query(
+      `SELECT g.id,g.name FROM dining_sessions s
+    JOIN command_center_reservations b ON b.id=s.reservation_id AND b.guest_id=s.guest_id
+    JOIN hostess_guests g ON g.id=s.guest_id AND g.merged_into IS NULL
+    WHERE s.id=$1 AND s.venue_id=$2 AND s.closed_at IS NULL AND s.seated_at IS NOT NULL
+    AND b.status='arrived' AND EXISTS(SELECT 1 FROM hostess_guest_identities i WHERE i.guest_id=g.id)`,
+      [sessionId, venueId],
+    )
+  ).rows[0] as { id: string; name: string } | undefined;
+}
 export function exchangeOrigin() {
   const value = process.env.EXCHANGE_API_ORIGIN;
   if (!value) throw new ApiError(503, "CONFIG_REQUIRED", "Не настроен адрес биржи");
@@ -70,8 +89,16 @@ export async function venue(client: Pick<PoolClient, "query">, slug: string) {
   if (!row) throw new ApiError(404, "VENUE_NOT_FOUND", "Заведение недоступно");
   return row;
 }
-export async function createQuote(owner: Owner, raw: unknown) {
+export async function createQuote(
+  owner: Owner,
+  raw: unknown,
+  staffContext?: { actor: string; sessionId: string },
+) {
   const input = quoteInput.parse(raw);
+  const access = input.qrToken.startsWith("visit_")
+    ? await accessTable(input.qrToken, owner)
+    : null;
+  if (access) input.qrToken = access.token;
   const table = await findTable(pool, input.qrToken);
   const exchangeItems = input.items.filter((item) => (item.itemType ?? "EXCHANGE") === "EXCHANGE");
   const regularItems = input.items.filter((item) => item.itemType === "REGULAR_MENU");
@@ -80,7 +107,19 @@ export async function createQuote(owner: Owner, raw: unknown) {
   const exchange = exchangeItems.length ? priceLines(await snapshot(), exchangeItems) : null;
   return transaction(async (client) => {
     await loyaltyLock(client);
+    await floorLock(client);
     const table = await findTable(client, input.qrToken, true);
+    const contextSessionId = staffContext?.sessionId ?? access?.session_id ?? null;
+    if (
+      contextSessionId &&
+      !(
+        await client.query(
+          "SELECT id FROM dining_sessions WHERE id=$1 AND venue_id=$2 AND resource_id=$3 AND seated_at IS NOT NULL AND closed_at IS NULL",
+          [contextSessionId, table.venue_id, table.resource_id],
+        )
+      ).rowCount
+    )
+      throw new ApiError(409, "SESSION_CHANGED", "Визит завершён или посадка не подтверждена");
     const regular = await regularPriceLines(client, table.venue_id, regularItems);
     const priced = {
       lines: [...(exchange?.lines ?? []), ...regular],
@@ -105,8 +144,8 @@ export async function createQuote(owner: Owner, raw: unknown) {
     );
     if (!owner.guestId) totals.cashbackMinor = 0;
     const result = await client.query(
-      `INSERT INTO dine_in_quotes(venue_id,qr_id,qr_generation,guest_id,owner_hash,lines,round_id,subtotal_minor,discount_minor,payable_minor,cashback_minor,expires_at)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id,expires_at AS "expiresAt"`,
+      `INSERT INTO dine_in_quotes(venue_id,qr_id,qr_generation,guest_id,owner_hash,lines,round_id,subtotal_minor,discount_minor,payable_minor,cashback_minor,expires_at,context_session_id,staff_actor,access_grant_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id,expires_at AS "expiresAt"`,
       [
         table.venue_id,
         table.id,
@@ -120,6 +159,9 @@ export async function createQuote(owner: Owner, raw: unknown) {
         totals.payableMinor,
         totals.cashbackMinor,
         priced.expiresAt,
+        contextSessionId,
+        staffContext?.actor ?? null,
+        access?.grant_id ?? null,
       ],
     );
     return {
@@ -135,7 +177,8 @@ export async function createQuote(owner: Owner, raw: unknown) {
 export async function orderDetail(client: Pick<PoolClient, "query">, id: string, venueId: string) {
   const row = (
     await client.query(
-      `SELECT o.id,o.number::text,o.venue_id AS "venueId",v.slug AS "venueCode",o.guest_id AS "guestId",r.code AS "tableCode",r.name AS "tableName",z.name AS "zoneName",
+      `SELECT o.id,o.number::text,o.venue_id AS "venueId",v.slug AS "venueCode",o.guest_id AS "guestId",o.dining_session_id AS "diningSessionId",o.table_resource_id AS "tableResourceId",r.code AS "tableCode",r.name AS "tableName",z.name AS "zoneName",
+    COALESCE((SELECT e.details->>'source' FROM dine_in_order_events e WHERE e.order_id=o.id AND e.type='created' ORDER BY e.created_at,e.id LIMIT 1),'qr') AS source,
     g.name AS "guestName",g.phone AS "guestPhone",o.status,o.payment_status AS "paymentStatus",o.manual_payment_at AS "manualPaymentAt",o.accepted_at AS "acceptedAt",
     (SELECT l.expires_at FROM loyalty_lots l WHERE l.order_id=o.id) AS "cashbackExpiresAt",o.subtotal_minor::text AS "subtotalMinor",o.discount_minor::text AS "discountMinor",o.payable_minor::text AS "payableMinor",o.cashback_minor::text AS "cashbackMinor",
     (SELECT COALESCE(jsonb_agg(jsonb_build_object('id',i.id,'productId',COALESCE(i.exchange_product_id,i.menu_item_id::text),'itemType',i.item_type,'menuVersion',i.menu_version,'name',i.name,'quantity',i.quantity,'unitPriceMinor',i.unit_price_minor::text,'totalMinor',i.total_minor::text,'roundId',i.round_id) ORDER BY i.id),'[]') FROM dine_in_order_items i WHERE i.order_id=o.id) AS items,
@@ -179,7 +222,7 @@ export async function enqueue(
     [order.id, type],
   );
 }
-export async function checkout(owner: Owner, raw: unknown) {
+export async function checkout(owner: Owner, raw: unknown, staffActor?: string) {
   const input = orderInput.parse(raw);
   if (process.env.DINE_IN_PILOT_ASSUMED_PAID !== "yes")
     throw new ApiError(503, "PAYMENT_MODE_REQUIRED", "Оформление заказа временно отключено");
@@ -209,6 +252,35 @@ export async function checkout(owner: Owner, raw: unknown) {
         throw new ApiError(409, "IDEMPOTENCY_MISMATCH", "Ключ уже использован для другого заказа");
       return { order: await orderDetail(client, prior.id, prior.venue_id), replayed: true };
     }
+    if (quote.staff_actor !== (staffActor ?? null))
+      throw new ApiError(403, "FORBIDDEN", "Расчёт принадлежит другому контексту");
+    if (
+      staffActor &&
+      owner.guestId &&
+      (await verifiedVisitGuest(client, quote.venue_id, quote.context_session_id))?.id !==
+        owner.guestId
+    )
+      throw new ApiError(409, "OWNER_CHANGED", "Проверенная связь гостя с визитом изменилась");
+    if (
+      quote.context_session_id &&
+      !(
+        await client.query(
+          `SELECT id FROM dining_sessions WHERE id=$1 AND venue_id=$2 AND seated_at IS NOT NULL AND closed_at IS NULL`,
+          [quote.context_session_id, quote.venue_id],
+        )
+      ).rowCount
+    )
+      throw new ApiError(409, "SESSION_CHANGED", "Визит завершён. Подтвердите текущий стол заново");
+    if (
+      quote.access_grant_id &&
+      !(
+        await client.query(
+          `SELECT id FROM dining_access_grants WHERE id=$1 AND owner_hash=$2 AND expires_at>clock_timestamp() AND revoked_at IS NULL`,
+          [quote.access_grant_id, owner.hash],
+        )
+      ).rowCount
+    )
+      throw new ApiError(409, "ACCESS_INVALID", "Подтверждение стола истекло. Попросите новый код");
     if (quote.guest_id !== owner.guestId)
       throw new ApiError(403, "OWNER_CHANGED", "Обновите расчёт после входа");
     if (quote.consumed_at) throw new ApiError(409, "QUOTE_USED", "Расчёт уже использован");
@@ -291,7 +363,15 @@ export async function checkout(owner: Owner, raw: unknown) {
     );
     if (!consumed.rowCount)
       throw new ApiError(409, "REQUOTE", "Цена истекла. Запросите новый расчёт");
-    await event(client, order, owner.guestId ? `guest:${owner.guestId}` : "anonymous", "created");
+    await event(
+      client,
+      order,
+      staffActor ?? (owner.guestId ? `guest:${owner.guestId}` : "anonymous"),
+      "created",
+      {
+        source: staffActor ? "staff" : quote.access_grant_id ? "table_code" : "qr",
+      },
+    );
     await enqueue(client, order, "ORDER_ACCEPTED");
     return {
       order: await orderDetail(client, order.id, qr.venue_id),

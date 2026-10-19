@@ -268,6 +268,11 @@ export async function mergeDiningGuest(client: PoolClient, from: string, to: str
   )
     throw new ApiError(409, "MERGE_CONFLICT", "Профили уже изменены");
   await client.query("UPDATE dine_in_orders SET guest_id=$2 WHERE guest_id=$1", [from, to]);
+  if ((await client.query("SELECT to_regclass('guest_booking_requests') AS name")).rows[0].name)
+    await client.query(
+      "UPDATE guest_booking_requests SET guest_id=$2,idempotency_key=id::text WHERE guest_id=$1",
+      [from, to],
+    );
   // Quotes use owner_hash as well as guest_id, so old browser confirmations cannot be stolen.
   await client.query("UPDATE hostess_guests SET merged_into=$2,updated_at=now() WHERE id=$1", [
     from,

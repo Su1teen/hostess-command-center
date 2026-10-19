@@ -19,6 +19,8 @@ import { createQuote, checkout, changeStatus, type Owner } from "../src/server/d
 import { wallets, walletView, loyaltyLock, mergeDiningGuest } from "../src/server/dine-in/loyalty";
 import { drainOutbox } from "../src/server/dine-in/outbox";
 import { saveMenuItem } from "../src/server/dine-in/menu";
+import { claimAccess, issueAccess } from "../src/server/dine-in/access";
+import { requestBooking, resolveBookingRequest } from "../src/server/dine-in/booking-requests";
 
 if (
   !process.env.TEST_DINING_DATABASE_URL?.includes("127.0.0.1") ||
@@ -1268,4 +1270,311 @@ test("XOXO staff read contract returns canonical menu and mixed orders only with
   const menu = await menuResponse.json();
   expect(menu.source).toBe("command_center");
   expect(menu.items.length).toBeGreaterThanOrEqual(1);
+});
+
+async function serviceVisit() {
+  const qr = (
+    await pool.query(
+      `SELECT q.* FROM table_qr_codes q WHERE q.enabled AND NOT EXISTS(SELECT 1 FROM dining_sessions s WHERE s.resource_id=q.resource_id AND s.closed_at IS NULL) LIMIT 1`,
+    )
+  ).rows[0];
+  const visit = (
+    await pool.query(
+      `INSERT INTO dining_sessions(venue_id,resource_id,seated_at,visit_status,expected_end_at) VALUES($1,$2,now(),'seated',now()+interval '1 hour') RETURNING id`,
+      [venueId, qr.resource_id],
+    )
+  ).rows[0];
+  return { qr, visit };
+}
+test("staff mixed checkout is canonical, actor-bound, idempotent and emits only exchange demand", async () => {
+  const { qr, visit } = await serviceVisit(),
+    item = await dish();
+  const input = {
+    sessionId: visit.id,
+    items: [
+      { productId, quantity: 2 },
+      { productId: item.id, quantity: 1, itemType: "REGULAR_MENU" },
+    ],
+  };
+  expect(
+    (await api("/api/staff/v1/dine-in/staff-quotes", input, { cookie: staff.viewer })).status,
+  ).toBe(403);
+  expect(
+    (
+      await api("/api/staff/v1/dine-in/staff-quotes", input, {
+        cookie: staff.operator,
+        origin: "https://evil.test",
+      })
+    ).status,
+  ).toBe(403);
+  const response = await api("/api/staff/v1/dine-in/staff-quotes", input, {
+    cookie: staff.operator,
+  });
+  expect(response.status).toBe(201);
+  const q = await response.json(),
+    body = { quoteId: q.id, idempotencyKey: randomToken() };
+  expect(
+    (await api("/api/staff/v1/dine-in/staff-orders", body, { cookie: staff.manager })).status,
+  ).toBe(404);
+  const [a, b] = await Promise.all([
+    api("/api/staff/v1/dine-in/staff-orders", body, { cookie: staff.operator }),
+    api("/api/staff/v1/dine-in/staff-orders", body, { cookie: staff.operator }),
+  ]);
+  const first = await a.json(),
+    second = await b.json();
+  expect(first.order.id).toBe(second.order.id);
+  expect(first.order.items.length).toBe(2);
+  expect(first.order.cashbackMinor).toBe("0");
+  expect(first.order.events.find((e: { type: string }) => e.type === "created").actor).toBe(
+    "staff:operator",
+  );
+  expect(
+    (await pool.query("SELECT id FROM integration_outbox WHERE order_id=$1", [first.order.id]))
+      .rowCount,
+  ).toBe(1);
+  expect(
+    (
+      await pool.query(
+        "SELECT dining_session_id,table_resource_id FROM dine_in_orders WHERE id=$1",
+        [first.order.id],
+      )
+    ).rows[0],
+  ).toEqual({ dining_session_id: visit.id, table_resource_id: qr.resource_id });
+  const stale = await api("/api/staff/v1/dine-in/staff-quotes", input, { cookie: staff.operator }),
+    staleQuote = await stale.json();
+  await pool.query(
+    "UPDATE dining_sessions SET closed_at=now(),visit_status='released' WHERE id=$1",
+    [visit.id],
+  );
+  expect(
+    (
+      await api(
+        "/api/staff/v1/dine-in/staff-orders",
+        { quoteId: staleQuote.id, idempotencyKey: randomToken() },
+        { cookie: staff.operator },
+      )
+    ).status,
+  ).toBe(409);
+  expect(
+    (await api("/api/staff/v1/dine-in/staff-orders", body, { cookie: staff.operator })).status,
+  ).toBe(200);
+});
+test("no-QR code binds one owner, never leaks permanent token, expires and cannot cross visits", async () => {
+  const { qr, visit } = await serviceVisit(),
+    owner = anon();
+  const issued = await issueAccess(venueId, "operator", { sessionId: visit.id });
+  const [a, b] = await Promise.all([
+    claimAccess(owner, { code: issued.code }),
+    claimAccess(owner, { code: issued.code }),
+  ]);
+  expect(a.accessToken).toBe(b.accessToken);
+  expect(a.accessToken).not.toBe(qr.token);
+  await expect(claimAccess(anon(), { code: issued.code })).rejects.toMatchObject({
+    code: "ACCESS_INVALID",
+  });
+  const q = await createQuote(owner, {
+    qrToken: a.accessToken,
+    items: [{ productId, quantity: 1 }],
+  });
+  const order = await checkout(owner, { quoteId: q.id, idempotencyKey: randomToken() });
+  expect(order.order.tableCode).toBe(
+    (await pool.query("SELECT code FROM venue_resources WHERE id=$1", [qr.resource_id])).rows[0]
+      .code,
+  );
+  const next = await createQuote(owner, {
+    qrToken: a.accessToken,
+    items: [{ productId, quantity: 1 }],
+  });
+  await pool.query(
+    "UPDATE dining_access_grants SET expires_at=now()-interval '1 second' WHERE session_id=$1",
+    [visit.id],
+  );
+  await expect(
+    checkout(owner, { quoteId: next.id, idempotencyKey: randomToken() }),
+  ).rejects.toMatchObject({ code: "ACCESS_INVALID" });
+  const fresh = await issueAccess(venueId, "operator", { sessionId: visit.id }),
+    grant = await claimAccess(owner, { code: fresh.code });
+  const last = await createQuote(owner, {
+    qrToken: grant.accessToken,
+    items: [{ productId, quantity: 1 }],
+  });
+  await pool.query(
+    "UPDATE dining_sessions SET closed_at=now(),visit_status='released' WHERE id=$1",
+    [visit.id],
+  );
+  await expect(
+    checkout(owner, { quoteId: last.id, idempotencyKey: randomToken() }),
+  ).rejects.toMatchObject({ code: "SESSION_CHANGED" });
+  expect(
+    (await pool.query("SELECT id FROM dine_in_orders WHERE quote_id IN($1,$2)", [next.id, last.id]))
+      .rowCount,
+  ).toBe(0);
+});
+test("no-QR transport sets owner cookie, claims idempotently and rejects a second phone", async () => {
+  const { visit } = await serviceVisit();
+  const issued = await issueAccess(venueId, "operator", { sessionId: visit.id });
+  const claimed = await api("/api/guest/v1/dine-in/access/claim", { code: issued.code });
+  expect(claimed.status).toBe(200);
+  const cookie = claimed.headers.get("set-cookie")!.split(";")[0],
+    data = await claimed.json();
+  const tableResponse = await api("/api/guest/v1/dine-in/tables/" + data.accessToken, undefined, {
+    cookie,
+  });
+  expect(tableResponse.status).toBe(200);
+  expect(JSON.stringify(await tableResponse.json())).not.toContain("visit_");
+  expect((await api("/api/guest/v1/dine-in/tables/" + data.accessToken)).status).toBe(401);
+  expect((await api("/api/guest/v1/dine-in/access/claim", { code: issued.code })).status).toBe(409);
+  expect(
+    (await api("/api/guest/v1/dine-in/access/claim", { code: issued.code }, { cookie })).status,
+  ).toBe(200);
+});
+test("two employees accepting and marking payment produce one event for each operation", async () => {
+  const o = await submit(anon());
+  await Promise.all([
+    changeStatus(o.order.id, venueId, "operator", "accepted"),
+    changeStatus(o.order.id, venueId, "manager", "accepted"),
+  ]);
+  await Promise.all([
+    changeStatus(o.order.id, venueId, "operator", undefined, undefined, true),
+    changeStatus(o.order.id, venueId, "manager", undefined, undefined, true),
+  ]);
+  const events = (
+    await pool.query(
+      "SELECT type,count(*)::int AS n FROM dine_in_order_events WHERE order_id=$1 GROUP BY type",
+      [o.order.id],
+    )
+  ).rows;
+  expect(events.find((e) => e.type === "accepted").n).toBe(1);
+  expect(events.find((e) => e.type === "manual_payment_received").n).toBe(1);
+  const ops = await api("/api/staff/v1/dine-in/operations", undefined, { cookie: staff.operator });
+  expect(ops.status).toBe(200);
+  expect((await ops.json()).orders.some((r: { id: string }) => r.id === o.order.id)).toBe(true);
+});
+test("booking request allocates nothing until manager confirms a verified resource, retries create one reservation", async () => {
+  const g = await guest(),
+    start = new Date(Date.now() + 86400000 * 3);
+  start.setUTCHours(14, 0, 0, 0);
+  const input = {
+    startsAt: start.toISOString(),
+    endsAt: new Date(+start + 7200000).toISOString(),
+    guests: 2,
+    idempotencyKey: randomToken(),
+  };
+  const [a, b] = await Promise.all([
+    requestBooking(venueId, g.id, input),
+    requestBooking(venueId, g.id, input),
+  ]);
+  expect(a.id).toBe(b.id);
+  expect(
+    (await pool.query("SELECT id FROM command_center_reservations WHERE guest_id=$1", [g.id]))
+      .rowCount,
+  ).toBe(0);
+  expect(
+    (
+      await api(
+        `/api/staff/v1/dine-in/booking-requests/${a.id}`,
+        { action: "reject", reason: "No space" },
+        { cookie: staff.operator, method: "PATCH" },
+      )
+    ).status,
+  ).toBe(403);
+  const resource = (
+    await pool.query("SELECT id FROM venue_resources WHERE code='VIP3' AND venue_id=$1", [venueId])
+  ).rows[0];
+  const [x, y] = await Promise.all([
+    resolveBookingRequest(venueId, "manager", a.id, { action: "confirm", resourceId: resource.id }),
+    resolveBookingRequest(venueId, "manager", a.id, { action: "confirm", resourceId: resource.id }),
+  ]);
+  expect(x.reservationId).toBe(y.reservationId);
+  expect(x.status).toBe("confirmed");
+  expect(
+    (
+      await pool.query("SELECT guest_id FROM command_center_reservations WHERE id=$1", [
+        x.reservationId,
+      ])
+    ).rows[0].guest_id,
+  ).toBe(g.id);
+});
+test("regular-only booking preorder has no invented exchange round or market demand", async () => {
+  const g = await guest(),
+    item = await dish();
+  const response = await api(
+    "/api/guest/v1/quotes",
+    { items: [{ productId: item.id, quantity: 2, itemType: "REGULAR_MENU" }] },
+    { cookie: g.cookie },
+  );
+  expect(response.status).toBe(201);
+  const q = await response.json();
+  expect(q.roundId).toBe(null);
+  expect(q.lines[0].itemType).toBe("REGULAR_MENU");
+  expect(q.lines[0].total).toBe(4901);
+});
+
+test("staff wallet requires verified arrived reservation context and preserves 3 percent/FIFO invariants", async () => {
+  const g = await guest(),
+    { visit } = await serviceVisit();
+  await pool.query("UPDATE dining_sessions SET guest_id=$2 WHERE id=$1", [visit.id, g.id]);
+  const input = { sessionId: visit.id, useVisitGuest: true, items: [{ productId, quantity: 1 }] };
+  expect(
+    (await api("/api/staff/v1/dine-in/staff-quotes", input, { cookie: staff.operator })).status,
+  ).toBe(409);
+  const qr = (
+    await pool.query(
+      "SELECT q.*,r.code FROM dining_sessions s JOIN table_qr_codes q ON q.resource_id=s.resource_id JOIN venue_resources r ON r.id=q.resource_id WHERE s.id=$1",
+      [visit.id],
+    )
+  ).rows[0];
+  await pool.query(
+    "UPDATE dining_sessions SET closed_at=now(),visit_status='released' WHERE id=$1",
+    [visit.id],
+  );
+  await pool.query(
+    "UPDATE venue_resource_mappings SET relationship='independent',linked_resource_id=NULL,legacy_code=NULL,note='Isolated verified table',verified_at=now(),verified_by='manager' WHERE resource_id=$1",
+    [qr.resource_id],
+  );
+  await pool.query("UPDATE venue_resources SET capacity=4,is_reservable=true WHERE id=$1", [
+    qr.resource_id,
+  ]);
+  const booking = await transaction(async (c) => {
+    const b = (
+      await c.query(
+        `INSERT INTO command_center_reservations(guest_id,guest_name,phone,guests,starts_at,ends_at,table_id,table_ids,status) VALUES($1,'Verified guest','+77010000000',2,now()-interval '5 minutes',now()+interval '1 hour',$2,ARRAY[$2::text],'arrived') RETURNING id`,
+        [g.id, qr.code],
+      )
+    ).rows[0];
+    await c.query(
+      "INSERT INTO command_center_reservation_resources(reservation_id,resource_id) VALUES($1,$2)",
+      [b.id, qr.resource_id],
+    );
+    return b;
+  });
+  const s = (
+    await pool.query(
+      "INSERT INTO dining_sessions(venue_id,resource_id,seated_at,visit_status,guest_id,reservation_id) VALUES($1,$2,now(),'seated',$3,$4) RETURNING id",
+      [venueId, qr.resource_id, g.id, booking.id],
+    )
+  ).rows[0];
+  await pool.query(
+    "INSERT INTO hostess_guest_identities(guest_id,provider,subject) VALUES($1,'whatsapp',$2)",
+    [g.id, randomToken()],
+  );
+  await lot(g.id, 10000);
+  const response = await api(
+    "/api/staff/v1/dine-in/staff-quotes",
+    { ...input, sessionId: s.id, redeemMinor: 10000 },
+    { cookie: staff.operator },
+  );
+  expect(response.status).toBe(201);
+  const q = await response.json();
+  expect(q.discountMinor).toBe(10000);
+  expect(q.cashbackMinor).toBe(4400);
+  const result = await api(
+    "/api/staff/v1/dine-in/staff-orders",
+    { quoteId: q.id, idempotencyKey: randomToken() },
+    { cookie: staff.operator },
+  );
+  expect(result.status).toBe(201);
+  const order = (await result.json()).order;
+  expect(order.guestId).toBe(g.id);
+  expect((await balance(g.id)).balanceMinor).toBe(4400);
 });

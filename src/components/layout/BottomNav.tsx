@@ -1,16 +1,17 @@
-import { ChefHat, LayoutDashboard, Map as MapIcon, Truck, Users, ShoppingBag } from "lucide-react";
+import { ChefHat, LayoutDashboard, Map as MapIcon, Users, ShoppingBag } from "lucide-react";
 import { Link, useRouterState } from "@tanstack/react-router";
+import { useOperations } from "../orders/ServiceOperations";
 
 const items = [
+  { to: "/shift", label: "Смена", icon: LayoutDashboard },
   { to: "/orders", label: "Заказы", icon: ShoppingBag },
   { to: "/", label: "Зал", icon: MapIcon },
-  { to: "/dashboard", label: "Обзор", icon: LayoutDashboard },
   { to: "/menu", label: "Меню", icon: ChefHat },
   { to: "/guests", label: "Гости", icon: Users },
-  { to: "/suppliers", label: "Поставки", icon: Truck },
 ] as const;
 
 export function BottomNav() {
+  const operations = useOperations();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   return (
     <nav className="glass fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center justify-around rounded-full px-2 py-2 shadow-lg shadow-slate-300/20">
@@ -26,6 +27,14 @@ export function BottomNav() {
           >
             <Icon size={18} strokeWidth={active ? 2.5 : 2} />
             {label}
+            {to === "/shift" && !!operations?.data?.newCount && (
+              <span
+                className="rounded-full bg-amber-200 px-1.5 text-slate-900"
+                aria-label="Новые заказы"
+              >
+                {operations.data.newCount}
+              </span>
+            )}
           </Link>
         );
       })}

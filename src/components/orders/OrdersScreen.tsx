@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { openStaffOrder } from "./ServiceOperations";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../ui/sheet";
@@ -25,12 +26,8 @@ export function OrdersScreen() {
     [search, setSearch] = useState(""),
     [selected, setSelected] = useState<string | null>(null),
     [group, setGroup] = useState(true),
-    [sound, setSound] = useState(false),
-    [notice, setNotice] = useState(0),
     [reason, setReason] = useState(""),
     [guestSearch, setGuestSearch] = useState("");
-  const audio = useRef<AudioContext | null>(null),
-    seen = useRef<Set<string> | null>(null);
   useEffect(() => {
     const orderId = new URLSearchParams(window.location.search).get("order");
     if (orderId && /^[a-f0-9-]{36}$/i.test(orderId)) setSelected(orderId);
@@ -69,26 +66,6 @@ export function OrdersScreen() {
       void client.invalidateQueries({ queryKey: ["floor-operations"] });
     },
   });
-  useEffect(() => {
-    if (!list.data) return;
-    const count = seen.current
-      ? list.data.orders.filter((o) => o.status === "new" && !seen.current!.has(o.id)).length
-      : 0;
-    if (count) {
-      setNotice((n) => n + count);
-      if (sound && audio.current) {
-        const osc = audio.current.createOscillator(),
-          gain = audio.current.createGain();
-        osc.connect(gain);
-        gain.connect(audio.current.destination);
-        gain.gain.value = 0.12;
-        osc.frequency.value = 880;
-        osc.start();
-        osc.stop(audio.current.currentTime + 0.15);
-      }
-    }
-    seen.current = new Set([...(seen.current ?? []), ...list.data.orders.map((o) => o.id)]);
-  }, [list.data, sound]);
   const orders = list.data?.orders ?? [],
     order = detail.data?.order;
   const groups = group
@@ -110,6 +87,11 @@ export function OrdersScreen() {
         <div>
           <p className="text-xs uppercase tracking-widest text-slate-500">XOXO · обслуживание</p>
           <h1 className="mt-2 text-3xl font-semibold">Заказы</h1>
+          {canWrite && (
+            <button className={`${controlClass} mt-3`} onClick={() => openStaffOrder()}>
+              Создать заказ
+            </button>
+          )}
           <p className="mt-2 text-sm text-slate-500">Обновление каждые 4 секунды.</p>
         </div>
         <Link to="/tables/qr" className={`${controlClass} inline-flex items-center`}>
@@ -140,29 +122,10 @@ export function OrdersScreen() {
         <button className={controlClass} onClick={() => setGroup((v) => !v)}>
           {group ? "По столам" : "Общий список"}
         </button>
-        <button
-          className={controlClass}
-          aria-pressed={sound}
-          onClick={() => {
-            audio.current ??= new AudioContext();
-            void audio.current.resume();
-            setSound((v) => !v);
-          }}
-        >
-          Звук {sound ? "вкл." : "выкл."}
-        </button>
         <button className={controlClass} onClick={() => void list.refetch()}>
           Обновить
         </button>
       </div>
-      {notice > 0 && (
-        <button
-          onClick={() => setNotice(0)}
-          className="mt-4 w-full rounded-xl bg-emerald-100 p-3 text-sm text-emerald-900"
-        >
-          Новых заказов: {notice} · скрыть
-        </button>
-      )}
       {(list.error || mutation.error || detail.error) && (
         <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-red-700">
           {(list.error ?? mutation.error ?? detail.error)?.message}
@@ -187,6 +150,7 @@ export function OrdersScreen() {
                     onClick={() => {
                       setSelected(o.id);
                       setReason("");
+                      void client.invalidateQueries({ queryKey: ["service-operations"] });
                       setGuestSearch("");
                       mutation.reset();
                     }}
@@ -304,6 +268,13 @@ export function OrdersScreen() {
                   </button>
                 </div>
                 <p className="mt-4 font-medium">{order.guestName ?? "Гость без аккаунта"}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {order.source === "staff"
+                    ? "Оформлен сотрудником"
+                    : order.source === "table_code"
+                      ? "Оформлен гостем по коду стола"
+                      : "Оформлен гостем по QR"}
+                </p>
                 <p className="mt-1 text-xs text-slate-500">
                   {dateTime(order.acceptedAt)} · {statusLabels[order.status]}
                 </p>

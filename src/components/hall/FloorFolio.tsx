@@ -1,4 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { openStaffOrder } from "../orders/ServiceOperations";
+import { useStaffRole, controlClass } from "../../lib/dine-in-client";
 import { ExternalLink, ReceiptText } from "lucide-react";
 import { money, staffApi, statusLabels } from "../../lib/dine-in-client";
 import type { FloorFolio as Folio } from "../../lib/floor-operations";
@@ -12,6 +14,7 @@ const visitEvents: Record<string, string> = {
   order_created: "Добавлен заказ",
 };
 export function FloorFolio({ sessionId }: { sessionId: string }) {
+  const role = useStaffRole();
   const query = useQuery({
     queryKey: ["floor-folio", sessionId],
     queryFn: ({ signal }) =>
@@ -40,6 +43,11 @@ export function FloorFolio({ sessionId }: { sessionId: string }) {
       <div className="flex items-center gap-2">
         <ReceiptText size={17} />
         <h3 className="font-semibold">Фолио визита</h3>
+        {!folio.session.closedAt && (role === "operator" || role === "manager") && (
+          <button className={controlClass} onClick={() => openStaffOrder(sessionId)}>
+            Создать заказ
+          </button>
+        )}
       </div>
       <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm">
         <p className="font-medium">{folio.session.guestName ?? "Гость без аккаунта"}</p>
@@ -79,6 +87,11 @@ export function FloorFolio({ sessionId }: { sessionId: string }) {
           </a>
           <p className="px-3 pt-3 text-xs text-slate-500">
             {formatDateTimeAlmaty(order.acceptedAt)} · {statusLabels[order.status]}
+            {order.source === "staff"
+              ? " · Оформлен сотрудником"
+              : order.source === "table_code"
+                ? " · Код стола"
+                : " · QR"}
           </p>
           <p className="px-3 pt-2 text-sm font-medium">{order.guestName ?? "Гость без аккаунта"}</p>
           <ul className="divide-y px-3">

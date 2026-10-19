@@ -8,7 +8,11 @@ export async function staffApi<T>(path: string, init?: RequestInit): Promise<T> 
   const data = await response.json();
   if (response.status === 401 && typeof window !== "undefined")
     window.dispatchEvent(new CustomEvent("hostess:session-expired"));
-  if (!response.ok) throw new Error(data.error?.message ?? "Сервис недоступен");
+  if (!response.ok)
+    throw Object.assign(new Error(data.error?.message ?? "Сервис недоступен"), {
+      code: data.error?.code,
+      status: response.status,
+    });
   return data;
 }
 export function useStaffRole() {
@@ -41,6 +45,9 @@ export const statusLabels = {
 export type DineOrder = {
   id: string;
   number: string;
+  source?: "staff" | "qr" | "table_code";
+  diningSessionId?: string;
+  tableResourceId?: string;
   tableCode: string;
   tableName: string;
   zoneName: string;
