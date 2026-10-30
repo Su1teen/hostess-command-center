@@ -8,9 +8,11 @@ const base = `${process.env.N8N_URL?.replace(/\/$/, "")}/api/v1`;
 const key = process.env.N8N_API_KEY;
 if (!process.env.N8N_URL || !key) throw new Error("N8N_URL and N8N_API_KEY are required");
 const env = process.argv.find((a) => a.startsWith("--env="))?.slice(6) ?? "prod";
+// n8n folder that holds the three workflows (created once in the personal project).
+const folder = process.argv.find((a) => a.startsWith("--folder-id="))?.slice(12);
 const passthrough = process.argv
   .slice(2)
-  .filter((a) => !a.startsWith("--booking-id") && !a.startsWith("--handoff-id"));
+  .filter((a) => !/^--(booking-id|handoff-id|folder-id)=/.test(a));
 const dir = new URL(".", import.meta.url);
 const suffix = env === "test" ? ".test" : "";
 const idsFile = new URL(`ids${suffix}.json`, dir);
@@ -37,7 +39,12 @@ async function upsert(slot, file) {
   if (ids[slot]) {
     await api(`/workflows/${ids[slot]}`, { method: "PUT", body: JSON.stringify(payload) });
   } else {
-    ids[slot] = (await api("/workflows", { method: "POST", body: JSON.stringify(payload) })).id;
+    ids[slot] = (
+      await api("/workflows", {
+        method: "POST",
+        body: JSON.stringify(folder ? { ...payload, parentFolderId: folder } : payload),
+      })
+    ).id;
   }
   console.log(`${slot}: ${ids[slot]}  ${wf.name}`);
 }

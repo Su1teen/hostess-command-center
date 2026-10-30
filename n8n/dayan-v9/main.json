@@ -2,7 +2,7 @@
   "name": "Даян v9 · 1 · WhatsApp → ИИ-администратор",
   "nodes": [
     {
-      "id": "af979624-d227-424d-b2c2-1c652214b425",
+      "id": "b529d80d-c255-46ed-bc00-8919a63227ae",
       "name": "WAHA: входящее",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -15,10 +15,10 @@
         "path": "xoxo-waha",
         "options": {}
       },
-      "webhookId": "e1052739-b883-4a30-8df6-c882f55fbf0f"
+      "webhookId": "3a674c4a-dded-4335-bfcf-d4cef2edb3b8"
     },
     {
-      "id": "75d6a000-a5f5-4715-b5ae-531c8c3803ff",
+      "id": "1871dd65-4b86-4123-8962-9bf32ce7ce3d",
       "name": "Настройки",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -34,7 +34,7 @@
       }
     },
     {
-      "id": "6f6d564e-484e-4d3d-889a-2874c21668cd",
+      "id": "ec5de382-fa2b-4ebc-866c-4bfffc9d7393",
       "name": "Разбор сообщения",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -47,7 +47,7 @@
       }
     },
     {
-      "id": "4e879556-c107-45fd-b1d9-7c0799475515",
+      "id": "f3f5d086-4f65-49b0-a4ea-7253efaeb1e8",
       "name": "Нужен номер по LID?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -66,7 +66,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "a54bda6a-78ad-45fb-aa50-97bded32cee3",
+              "id": "b8384b26-1adb-48c4-ad3b-d1d594f53696",
               "leftValue": "={{ $json.needsLid === true && !$json.jid }}",
               "rightValue": true,
               "operator": {
@@ -81,7 +81,7 @@
       }
     },
     {
-      "id": "4d338aa8-d4e6-417b-8ffe-caac00cbf642",
+      "id": "fcfbfd11-df4e-432a-826f-1bd2dee07f80",
       "name": "WAHA: номер по LID",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -107,7 +107,7 @@
       "alwaysOutputData": true
     },
     {
-      "id": "cb2a1e7b-dc1c-471b-bf23-136a95f0cd19",
+      "id": "0ec83a66-b53d-4b92-abaa-0c8ea1fc8502",
       "name": "Гость",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -120,7 +120,7 @@
       }
     },
     {
-      "id": "65539682-3bdb-444c-931f-8f8695b79200",
+      "id": "aa2cb916-cf5a-40aa-9084-4636dd6ee7a7",
       "name": "Command Center: входящее",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -158,7 +158,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "dc177166-fd14-4655-b54d-66dae80306e0",
+      "id": "e5f554c3-0b71-4691-ba68-4bb456ee88a3",
       "name": "Контекст",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -171,7 +171,7 @@
       }
     },
     {
-      "id": "e91dc855-a523-411e-b965-dfca1e74e3ee",
+      "id": "97a0a0af-022f-41f2-9ccf-63fcf2bad2c4",
       "name": "Куда дальше",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -193,7 +193,7 @@
                 "combinator": "and",
                 "conditions": [
                   {
-                    "id": "ca1a9ac6-420e-445a-bb64-1488024b3b8f",
+                    "id": "a807e060-1597-4efb-9b4e-1bbbd4298874",
                     "leftValue": "={{ $json.route }}",
                     "rightValue": "agent",
                     "operator": {
@@ -217,7 +217,7 @@
                 "combinator": "and",
                 "conditions": [
                   {
-                    "id": "e78482c4-8316-4c45-9aae-2968307b7993",
+                    "id": "18cfffbb-b2b0-4b7c-9e51-bc167d4a0688",
                     "leftValue": "={{ $json.route }}",
                     "rightValue": "paused",
                     "operator": {
@@ -241,7 +241,7 @@
                 "combinator": "and",
                 "conditions": [
                   {
-                    "id": "f11de462-7d5e-4679-9b0e-409c6e76a9d2",
+                    "id": "60259299-dd89-4da4-a4ee-f6788afa55cd",
                     "leftValue": "={{ $json.route }}",
                     "rightValue": "backend_down",
                     "operator": {
@@ -260,7 +260,7 @@
       }
     },
     {
-      "id": "d6031dcd-0f8b-4beb-9b0c-b06010f3ed17",
+      "id": "915d0ff0-260f-42a4-8895-1b2a6fc924ab",
       "name": "Даян",
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 2.2,
@@ -283,7 +283,7 @@
       "waitBetweenTries": 2000
     },
     {
-      "id": "4dbf1b6e-53ef-48a7-9ac2-771b5dc9b5a7",
+      "id": "b64c8ae5-23a3-4529-8e4c-cddbc8b037cc",
       "name": "OpenAI",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
@@ -311,7 +311,7 @@
       }
     },
     {
-      "id": "e6e2be00-7dba-4c05-a0ae-e65b05d63df7",
+      "id": "f5e8e546-7bae-45a0-a6ce-b3028522d999",
       "name": "check_availability",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.2,
@@ -340,7 +340,7 @@
       }
     },
     {
-      "id": "49313d75-648d-4e7f-972a-e705b21507c5",
+      "id": "19b43609-895a-4700-b5fa-02dfb025fda2",
       "name": "menu_search",
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.2,
@@ -375,7 +375,7 @@
       }
     },
     {
-      "id": "231ac715-8d62-4d39-980e-f2544cfd44f8",
+      "id": "78d857ac-6f77-4a5f-8ad2-61c4285aa92a",
       "name": "create_booking",
       "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
       "typeVersion": 2.2,
@@ -387,7 +387,7 @@
         "description": "Поставить бронь в Command Center. Вызывай, только когда гость сам назвал имя, дату, время и число гостей и хочет забронировать. Никогда не придумывай и не подставляй эти данные. Сам подбирает стол, записывает бронь и уведомляет персонал. Ответ: status confirmed/accepted — бронь стоит; needsGuestInput — нужно поправить данные (см. problem).",
         "workflowId": {
           "__rl": true,
-          "value": "BOOKING_WORKFLOW_ID",
+          "value": "xCqQ0IhioV9Uwk1a",
           "mode": "id"
         },
         "workflowInputs": {
@@ -557,7 +557,7 @@
       }
     },
     {
-      "id": "09a0a77f-50da-4b4a-ae20-e43b69dfe43e",
+      "id": "24a97855-a513-4242-b5b4-58a3c51f0cc1",
       "name": "handoff_to_staff",
       "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
       "typeVersion": 2.2,
@@ -569,7 +569,7 @@
         "description": "Передать чат живому администратору и остановить себя в этом чате. Для жалоб, возвратов, отмены/переноса существующей брони, банкетов от 20 человек, просьбы позвать менеджера, или если не можешь помочь.",
         "workflowId": {
           "__rl": true,
-          "value": "HANDOFF_WORKFLOW_ID",
+          "value": "AzaWetzeoxZvfqKa",
           "mode": "id"
         },
         "workflowInputs": {
@@ -662,7 +662,7 @@
       }
     },
     {
-      "id": "af58b9c6-bb62-48a4-83ec-ffbd32cf8502",
+      "id": "d459751a-b89e-476e-8b11-1c3f285405c1",
       "name": "Ответ гостю",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -675,7 +675,7 @@
       }
     },
     {
-      "id": "6398c8de-9bce-4a76-9f6b-ff156be59172",
+      "id": "839b43e7-ff4c-446a-ba61-eaba6e63bc7c",
       "name": "Инструмент сломался?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -694,7 +694,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "75cdc2b2-a6fb-4c91-ab2c-ed5b48b0b757",
+              "id": "1f3a2cc5-efd9-4ffc-8d45-a43e5f4d8c66",
               "leftValue": "={{ Boolean($json.toolFailure) }}",
               "rightValue": true,
               "operator": {
@@ -709,7 +709,7 @@
       }
     },
     {
-      "id": "29d293fd-cb15-4b81-8bab-e68947d122d0",
+      "id": "2e414334-5805-43a9-8332-958ff72ea7a9",
       "name": "Command Center: остановить ИИ (инструмент)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -747,7 +747,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "7f231f08-6d9f-4df8-a1b3-f8fbe0dd86bf",
+      "id": "096cec95-b13d-40f1-bf33-8733ea37694b",
       "name": "Telegram: сбой инструмента",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -770,10 +770,10 @@
         }
       },
       "onError": "continueRegularOutput",
-      "webhookId": "1f2036f3-0952-4831-92dc-d789277b32d2"
+      "webhookId": "6c031c32-49ed-414b-a532-954ba48b1a18"
     },
     {
-      "id": "5659b0e1-7dca-461c-b4fd-8a05ac8c60c1",
+      "id": "29b359b5-9829-4b5a-b153-44a2929ed777",
       "name": "Есть ответ?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -792,7 +792,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "ac195c0a-704a-4cb1-8b31-e17cf26099f5",
+              "id": "78cc3593-964e-45c5-8188-b46948a01109",
               "leftValue": "={{ Boolean($json.text) }}",
               "rightValue": true,
               "operator": {
@@ -807,7 +807,7 @@
       }
     },
     {
-      "id": "6f26474a-7dc5-4a96-aaf0-4658e6f9f6bf",
+      "id": "45093374-43db-468d-a2b6-652599070d52",
       "name": "Command Center: ответ в историю",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -845,7 +845,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "7f959a35-e457-4c4e-b070-c1a8d7f1a20d",
+      "id": "ef6b4cfc-eeba-4273-bc75-80cbaf47c976",
       "name": "Отправлять в WhatsApp?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -864,7 +864,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "326fd311-53b3-4f52-8625-b091522d9480",
+              "id": "d65315f6-5a39-433a-a53a-e9f325823663",
               "leftValue": "={{ $('Ответ гостю').first().json.dryRun !== true }}",
               "rightValue": true,
               "operator": {
@@ -879,7 +879,7 @@
       }
     },
     {
-      "id": "59f9a2ad-27cd-4829-ad0e-81820870bdbb",
+      "id": "ee02adcd-86f3-4469-be37-af501365bc72",
       "name": "WhatsApp: гостю",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -917,7 +917,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "addf372a-68e6-4715-a95f-9069bc9e8651",
+      "id": "1122432b-92db-4064-902d-799e0e0d3e41",
       "name": "WhatsApp не принял?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -936,7 +936,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "d33be14b-837c-4a55-94f4-6df84f96e7d0",
+              "id": "ec9c374d-b596-4a7c-a1aa-881f6bda9b6c",
               "leftValue": "={{ !($json.statusCode >= 200 && $json.statusCode < 300) }}",
               "rightValue": true,
               "operator": {
@@ -951,7 +951,7 @@
       }
     },
     {
-      "id": "8e111229-4364-4ad4-9fde-420d0dd3b2d8",
+      "id": "5cc5eb0d-502f-493e-8a45-8e6eb3cc93f2",
       "name": "Telegram: ответ не ушёл",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -974,10 +974,10 @@
         }
       },
       "onError": "continueRegularOutput",
-      "webhookId": "5ba6b201-57c8-4092-b457-463f834bee4e"
+      "webhookId": "69c1569e-12a3-4f12-b467-25f0888ec054"
     },
     {
-      "id": "bc66a901-98b9-4ec9-8107-a9480755e70c",
+      "id": "12a58fe6-d884-4dce-a92e-7277ca9b1b33",
       "name": "Command Center: остановить ИИ (сбой)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1015,7 +1015,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "53f6e8fb-cbc0-48db-b000-d07d4d21a119",
+      "id": "f31a1deb-e10e-4ade-8808-f4df10ae5dec",
       "name": "Telegram: сбой ИИ",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -1038,10 +1038,10 @@
         }
       },
       "onError": "continueRegularOutput",
-      "webhookId": "97b5f8ea-a3fc-4754-a4fa-d125a1a599b6"
+      "webhookId": "d312455a-bb06-4278-9027-00002251a93c"
     },
     {
-      "id": "5b38c23e-c5fb-40e3-b4fe-bd2450dc0894",
+      "id": "a1d452e3-06fe-40b1-a3ec-a8813461e5d8",
       "name": "Telegram: гость пишет сотруднику",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -1064,10 +1064,10 @@
         }
       },
       "onError": "continueRegularOutput",
-      "webhookId": "dde5c7ce-26ab-4b8c-addf-fec02ed36254"
+      "webhookId": "c9290d18-c7b5-4b65-83cb-211c317a26c4"
     },
     {
-      "id": "7259e968-f8ed-44a7-9bb1-94eba250d110",
+      "id": "112623cb-a342-41db-aca5-210e0f1f4735",
       "name": "Telegram: Command Center недоступен",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -1090,7 +1090,7 @@
         }
       },
       "onError": "continueRegularOutput",
-      "webhookId": "3a9e1c97-f3f1-4313-974a-37d3a5db3e94"
+      "webhookId": "b97eaa7d-102f-475c-9b4f-d2f936199355"
     }
   ],
   "connections": {

@@ -2,7 +2,7 @@
   "name": "Даян v9 · 2 · Бронь в Command Center",
   "nodes": [
     {
-      "id": "02e34567-2121-401e-9634-71d9430add7f",
+      "id": "43068b7d-b0f8-495b-a25a-83670c650af6",
       "name": "Старт",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
@@ -74,7 +74,7 @@
       }
     },
     {
-      "id": "f316eace-728e-4b70-bbc4-13cf065c4cf5",
+      "id": "a0e4c63c-7d79-4a02-a0a9-5243d0a92efb",
       "name": "Настройки",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -90,7 +90,7 @@
       }
     },
     {
-      "id": "4e7e9b8d-636e-4d8c-b34c-de34c48d9d49",
+      "id": "07c6bcd8-0ed0-4ef3-a632-31faca9e4574",
       "name": "Проверка данных",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -103,7 +103,7 @@
       }
     },
     {
-      "id": "c8a705d1-ae83-437f-87af-79a380e9dbe0",
+      "id": "efa3e98a-7b86-48b9-9f93-c44e3fcaa020",
       "name": "Данных хватает?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -122,7 +122,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "fb0ed17d-e95d-4132-b8a5-5d1869886518",
+              "id": "28a06a02-7a11-4ec3-a726-b8777747e772",
               "leftValue": "={{ $json.valid === true }}",
               "rightValue": true,
               "operator": {
@@ -137,7 +137,7 @@
       }
     },
     {
-      "id": "4f5c2bf7-0ac2-468c-a4fe-66c17ebbf037",
+      "id": "e8e0d04f-3530-45f5-92ab-2d5b31e9c5cc",
       "name": "Нужны данные от гостя",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -150,7 +150,7 @@
       }
     },
     {
-      "id": "c9c0f0a1-865b-4bb4-9fdf-9580f2e8569e",
+      "id": "f7435b27-69d1-4910-b119-c822904f8993",
       "name": "Command Center: бронь",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -188,7 +188,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "ee635114-8fc4-4826-b550-58eed249beb2",
+      "id": "76eb57ef-52ed-46fb-8b38-b028266521a4",
       "name": "Итог брони",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -201,7 +201,7 @@
       }
     },
     {
-      "id": "a612d8e2-e50a-4762-809d-f1af7fd4497c",
+      "id": "9e0798a8-15ab-4b8d-b611-54eb630bb182",
       "name": "В общий чат?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -220,7 +220,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "260a677b-7ace-4942-a80b-6650ee87a3be",
+              "id": "ae865fad-ea78-4975-9ab9-2510db1c9ca1",
               "leftValue": "={{ $json.sendGroup === true }}",
               "rightValue": true,
               "operator": {
@@ -235,7 +235,7 @@
       }
     },
     {
-      "id": "31c2cf34-5816-4aeb-bf59-cb63486201b0",
+      "id": "690766ae-7712-4a23-b73b-6c8cc2dfeede",
       "name": "WhatsApp: общий чат",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -273,7 +273,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "cf42cb0b-1f08-4a98-a33f-afe9889f26b9",
+      "id": "7063c9c2-1717-4a3c-87ab-e941dfb8d5ea",
       "name": "Проверка уведомлений",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -286,7 +286,7 @@
       }
     },
     {
-      "id": "49484ac1-f4b9-4662-a4ec-6861445a89a9",
+      "id": "1ddae7a6-834c-42eb-87eb-894fdb733b25",
       "name": "Нужно остановить ИИ?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -305,7 +305,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "cb6d082d-f6ba-4888-8cab-19c09a98117f",
+              "id": "81c9455b-1ca1-49d8-a177-398798bed3e2",
               "leftValue": "={{ $json.pause === true }}",
               "rightValue": true,
               "operator": {
@@ -320,7 +320,7 @@
       }
     },
     {
-      "id": "d768bda0-e273-4604-a638-3a19454587f3",
+      "id": "79a2046f-b648-4137-98e6-2575060ea22c",
       "name": "Command Center: остановить ИИ",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -358,7 +358,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "6dd54b71-09b4-4de2-a9b8-af078430c211",
+      "id": "67107abb-22fb-4f65-8715-79eea785e77f",
       "name": "Есть сообщение в Telegram?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -377,7 +377,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "fcf4c79d-e232-4d4c-9d17-5a0302b5fed5",
+              "id": "699c80d9-e40d-486f-9781-8ddc3c315588",
               "leftValue": "={{ Boolean($('Проверка уведомлений').first().json.telegramText) }}",
               "rightValue": true,
               "operator": {
@@ -392,7 +392,7 @@
       }
     },
     {
-      "id": "f96bb4bb-d9d3-44aa-9c1d-8594121c7cc9",
+      "id": "ff2c743a-5803-4517-a3f9-e9c5a09a1184",
       "name": "Telegram: администраторам",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -415,10 +415,10 @@
         }
       },
       "onError": "continueRegularOutput",
-      "webhookId": "2fe58827-d0a7-4ebd-b380-57f91ba2f7d6"
+      "webhookId": "bff355e6-15b8-4005-92c8-4dd6f28f6897"
     },
     {
-      "id": "69fcc1e1-d3c1-401d-8f19-f11bd8b633cc",
+      "id": "3bd4ca7c-5307-444c-9141-b8490b4262cb",
       "name": "Ответ агенту",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
