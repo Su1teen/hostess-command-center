@@ -112,17 +112,32 @@ export function ServiceOperations({ children }: { children: ReactNode }) {
   const stale = query.isError || (!!query.dataUpdatedAt && now - query.dataUpdatedAt > 15000);
   return (
     <Context.Provider value={query}>
-      <div className="mx-auto flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-2 text-xs lg:ml-52">
-        <a className="min-h-11 content-center font-semibold" href="/shift">
-          Смена · новых: {query.data?.newCount ?? "…"}
+      <div className="mx-auto flex items-center gap-2 border-b border-slate-200 px-5 py-2 text-xs lg:ml-52">
+        <a
+          className={`inline-flex min-h-10 items-center gap-2 rounded-full px-3 font-semibold ${query.data?.newCount ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700"}`}
+          href="/shift"
+        >
+          <span
+            aria-hidden
+            className={`size-2 rounded-full ${stale ? "bg-red-500" : "bg-emerald-500"}`}
+          />
+          Новых заказов: {query.data?.newCount ?? "…"}
         </a>
-        <span role="status" className={stale ? "text-red-700" : "text-slate-500"}>
+        <span
+          role="status"
+          className={`min-w-0 flex-1 truncate ${stale ? "text-red-700" : "sr-only"}`}
+        >
           {stale
-            ? `Связь потеряна · обновлено ${query.dataUpdatedAt ? Math.floor((now - query.dataUpdatedAt) / 1000) : "—"} сек. назад`
+            ? `Связь потеряна · ${query.dataUpdatedAt ? Math.floor((now - query.dataUpdatedAt) / 1000) : "—"} сек.`
             : "Заказы обновляются автоматически"}
         </span>
-        <button className={controlClass} aria-pressed={sound} onClick={() => void toggleSound()}>
-          Звук {sound ? "вкл." : "выкл."}
+        <button
+          className={`${controlClass} ml-auto`}
+          aria-pressed={sound}
+          title="Звуковой сигнал о новых заказах"
+          onClick={() => void toggleSound()}
+        >
+          {sound ? "🔔 Звук вкл." : "🔕 Звук выкл."}
         </button>
         {stale && (
           <button className={controlClass} onClick={() => void query.refetch()}>

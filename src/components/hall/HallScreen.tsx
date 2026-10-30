@@ -297,7 +297,7 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
         <>
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
             <p>
-              {resources.length} QR-точек ·{" "}
+              {resources.length} столов ·{" "}
               {resources.filter((item) => item.currentSession?.seatedAt).length} с гостями ·{" "}
               {resources.filter((item) => item.available).length} свободно на интервал
               {attention > 0 && (
@@ -311,53 +311,91 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
           </div>
           {!zone && filters.mode !== "day" ? (
             <div className="grid gap-3 sm:grid-cols-2">
-              {zones.map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  onClick={() => setFilter({ zone: item.id })}
-                  className="rounded-2xl border border-slate-200 bg-white p-5 text-left transition-colors hover:border-slate-400"
-                >
-                  <div className="flex justify-between">
-                    <h2 className="font-semibold">{item.name}</h2>
-                    <ChevronRight size={16} className="text-slate-400" />
-                  </div>
-                  <div className="mt-4 grid grid-cols-3 gap-x-3 gap-y-4">
-                    {(
-                      [
-                        [item.counts.total, "QR-точек"],
-                        [item.counts.seated, "с гостями"],
-                        [item.counts.available, "свободно"],
-                        [item.counts.reservations, "будущих броней"],
-                        [item.counts.activeOrders, "с заказами"],
-                        [item.counts.attention, "внимание"],
-                      ] as const
-                    ).map(([value, label]) => (
-                      <div key={label}>
-                        <strong className="block text-xl font-semibold tabular-nums">
-                          {value}
-                        </strong>
-                        <span className="text-[10px] text-slate-500">{label}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-1" aria-hidden>
-                    {item.resources.map((resource) => (
-                      <span
-                        key={resource.id}
-                        className="rounded-md border px-2 py-1 text-[10px]"
-                        style={{
-                          background: FLOOR_STATE_STYLE[resource.state].fill,
-                          borderColor: FLOOR_STATE_STYLE[resource.state].stroke,
-                          color: FLOOR_STATE_STYLE[resource.state].text,
-                        }}
-                      >
-                        {resource.name}
+              {zones.map((item) => {
+                const busy = item.counts.total - item.counts.available;
+                const facts = (
+                  [
+                    [item.counts.seated, "с гостями"],
+                    [item.counts.reservations, "брони впереди"],
+                    [item.counts.activeOrders, "с заказами"],
+                    [item.counts.attention, "требуют внимания"],
+                  ] as const
+                ).filter(([value]) => value > 0);
+                return (
+                  <section
+                    key={item.id}
+                    className="rounded-2xl border border-slate-200 bg-white p-4 transition-colors hover:border-slate-400"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setFilter({ zone: item.id })}
+                      className="flex w-full items-start justify-between gap-3 text-left"
+                    >
+                      <span>
+                        <h2 className="font-semibold">{item.name}</h2>
+                        <span className="mt-1 block text-sm text-slate-600">
+                          Свободно{" "}
+                          <strong className="text-lg text-slate-900 tabular-nums">
+                            {item.counts.available}
+                          </strong>{" "}
+                          из {item.counts.total}
+                        </span>
                       </span>
-                    ))}
-                  </div>
-                </button>
-              ))}
+                      <span className="inline-flex min-h-10 items-center gap-1 rounded-xl bg-slate-100 px-3 text-sm font-medium text-slate-700">
+                        Открыть
+                        <ChevronRight size={16} />
+                      </span>
+                    </button>
+                    <div
+                      className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100"
+                      aria-hidden
+                    >
+                      <div
+                        className="h-full rounded-full bg-slate-900"
+                        style={{
+                          width: `${item.counts.total ? (busy / item.counts.total) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+                    {facts.length > 0 && (
+                      <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+                        {facts.map(([value, label]) => (
+                          <span
+                            key={label}
+                            className={
+                              label === "требуют внимания" ? "font-semibold text-amber-800" : ""
+                            }
+                          >
+                            <strong className="tabular-nums">{value}</strong> {label}
+                          </span>
+                        ))}
+                      </p>
+                    )}
+                    <div className="mt-3 grid grid-cols-4 gap-2 sm:grid-cols-5">
+                      {item.resources.map((resource) => (
+                        <button
+                          type="button"
+                          key={resource.id}
+                          title={`${resource.name} · ${FLOOR_STATE_LABEL[resource.state]}`}
+                          aria-label={`${resource.name}: ${FLOOR_STATE_LABEL[resource.state]}`}
+                          onClick={() => {
+                            setFilter({ zone: item.id });
+                            select(resource.id);
+                          }}
+                          className="min-h-11 rounded-xl border text-sm font-semibold tabular-nums"
+                          style={{
+                            background: FLOOR_STATE_STYLE[resource.state].fill,
+                            borderColor: FLOOR_STATE_STYLE[resource.state].stroke,
+                            color: FLOOR_STATE_STYLE[resource.state].text,
+                          }}
+                        >
+                          {resource.name.replace(/^Стол\s+/i, "")}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
             </div>
           ) : filters.mode === "day" ? (
             <FloorTimeline

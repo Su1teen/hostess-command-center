@@ -1,0 +1,1402 @@
+{
+  "name": "Даян v9 · 1 · WhatsApp → ИИ-администратор",
+  "nodes": [
+    {
+      "id": "af979624-d227-424d-b2c2-1c652214b425",
+      "name": "WAHA: входящее",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "xoxo-waha",
+        "options": {}
+      },
+      "webhookId": "e1052739-b883-4a30-8df6-c882f55fbf0f"
+    },
+    {
+      "id": "75d6a000-a5f5-4715-b5ae-531c8c3803ff",
+      "name": "Настройки",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"testMode\": false,\n  \"ccBaseUrl\": \"https://hostess-command-center-production.up.railway.app\",\n  \"wahaBaseUrl\": \"https://waha-clean-production-a261.up.railway.app\",\n  \"wahaSession\": \"XoXo\",\n  \"staffGroupId\": \"120363403598925979@g.us\",\n  \"telegramChatId\": \"872587503\",\n  \"venueAddress\": \"Астана, ул. Санжара Асфендиярова, 8\",\n  \"venueMap\": \"https://2gis.kz/astana/firm/70000001089631692\"\n}",
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "6f6d564e-484e-4d3d-889a-2874c21668cd",
+      "name": "Разбор сообщения",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const raw = $('WAHA: входящее').first().json;\nconst e = raw.body && typeof raw.body === 'object' ? raw.body : raw;\nconst p = e.payload || {};\nconst cfg = $('Настройки').first().json;\nconst session = String(e.session || p.session || '').trim();\nconst event = String(e.event || '');\nconst chatId = String(p.from || p.chatId || '').trim();\nconst id = typeof p.id === 'string' ? p.id : String(p.id?._serialized || p.id?.id || '');\nconst text = typeof (p.body ?? p.text) === 'string' ? String(p.body ?? p.text).trim() : '';\n// Only real incoming personal text messages for our WAHA session.\nif (session.toLowerCase() !== String(cfg.wahaSession).toLowerCase() || !['message', 'message.any'].includes(event) || p.fromMe !== false) return [];\nif (!/^\\d+@(c\\.us|s\\.whatsapp\\.net|lid)$/i.test(chatId) || /^0+@/.test(chatId)) return [];\nif (!id || !text || p.hasMedia === true || p.isStatus === true || p.isGroupMsg === true) return [];\nif (!['chat', 'text', ''].includes(String(p.type || p._data?.type || 'chat').toLowerCase())) return [];\nif (/^(?:iVBORw0KGgo|\\/9j\\/|R0lGOD|UklGR)[A-Za-z0-9+/=]{100,}/.test(text) || /^[A-Za-z0-9+/]{450,}={0,2}$/.test(text)) return [];\nconst pn = chatId.replace('@s.whatsapp.net', '@c.us');\nconst alt = String(p._data?.Info?.SenderAlt || p._data?.key?.senderPn || '').replace(/[:@].*$/, '');\nreturn [{ json: {\n  chatId, messageId: id, text: text.slice(0, 3500),\n  pushName: String(p.notifyName || p._data?.notifyName || p._data?.Info?.PushName || '').slice(0, 80),\n  jid: /^7\\d{10}@c\\.us$/.test(pn) ? pn : /^7\\d{10}$/.test(alt) ? alt + '@c.us' : '',\n  needsLid: chatId.endsWith('@lid'),\n  dryRun: e._test === true,\n} }];"
+      }
+    },
+    {
+      "id": "4e879556-c107-45fd-b1d9-7c0799475515",
+      "name": "Нужен номер по LID?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "a54bda6a-78ad-45fb-aa50-97bded32cee3",
+              "leftValue": "={{ $json.needsLid === true && !$json.jid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "4d338aa8-d4e6-417b-8ffe-caac00cbf642",
+      "name": "WAHA: номер по LID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        200
+      ],
+      "parameters": {
+        "url": "={{ $('Настройки').first().json.wahaBaseUrl }}/api/{{ encodeURIComponent($('Настройки').first().json.wahaSession) }}/lids/{{ encodeURIComponent($json.chatId.split('@')[0]) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "efDgfDjzCTMvRmmM",
+          "name": "XoXo auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "cb2a1e7b-dc1c-471b-bf23-136a95f0cd19",
+      "name": "Гость",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const m = $('Разбор сообщения').first().json;\nlet lid = {}; try { lid = $('WAHA: номер по LID').first().json || {}; } catch {}\nconst pn = String(lid.pn || lid.phoneJid || lid.jid || '').replace('@s.whatsapp.net', '@c.us');\nconst jid = m.jid || (/^7\\d{10}@c\\.us$/.test(pn) ? pn : '');\nreturn [{ json: { ...m, jid, phone: jid ? '+' + jid.split('@')[0] : null } }];"
+      }
+    },
+    {
+      "id": "65539682-3bdb-444c-931f-8f8695b79200",
+      "name": "Command Center: входящее",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Настройки').first().json.ccBaseUrl }}/api/agent/v1/inbound",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: $('Настройки').first().json.wahaSession, chatId: $json.chatId, messageId: $json.messageId, text: $json.text, phone: $json.phone, pushName: $json.pushName || null }) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "16iV4WrEbTKjS0v7",
+          "name": "Hostess booking service"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dc177166-fd14-4655-b54d-66dae80306e0",
+      "name": "Контекст",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const g = $('Гость').first().json;\nconst r = $input.first().json || {};\nconst b = r.body && typeof r.body === 'object' ? r.body : {};\nif (Number(r.statusCode) !== 200 || typeof b.accepted !== 'boolean')\n  return [{ json: { route: 'backend_down', chatId: g.chatId, text: g.text, phone: g.phone, status: r.statusCode || null, error: String(b.error?.code || r.error?.message || '').slice(0, 200) } }];\nif (!b.accepted) return [];\nif (b.paused) return [{ json: { route: 'paused', chatId: g.chatId, text: g.text, phone: g.phone, reason: b.pausedReason, name: b.guest?.whatsappName } }];\nconst k = b.knowledge || {};\nconst zones = (k.zones || []).map(z => z.name).join(', ') || 'Первый зал, Второй зал, ПС / общий зал, VIP-комнаты';\nconst PROMPT = \"Ты — Даян, администратор спорт-бара XoXo Sports & Lounge в Астане. Ты переписываешься с гостями в WhatsApp от имени заведения.\\n\\n# Как писать\\n- Коротко и по делу: 1–3 предложения. Без воды и канцелярита. Никогда не заканчивай фразами «Чем могу помочь?», «Обращайтесь», «Если будут вопросы — пишите».\\n- Тепло и уверенно, как живой администратор. На «вы». Язык гостя: русский или казахский.\\n- Здороваешься только в первом ответе диалога (если в истории уже есть твои сообщения — не здороваешься).\\n- Обычный текст без Markdown, списков со звёздочками и заголовков. Эмодзи — максимум один и не в каждом сообщении.\\n- Никогда не упоминай ИИ, ботов, системы, инструменты, ошибки, сбои, «технические причины». Для гостя всё всегда работает.\\n- Не повторяй один и тот же вопрос дважды подряд и не пересказывай гостю его же слова.\\n\\n# Заведение\\n- XoXo Sports & Lounge, Астана, ул. Санжара Асфендиярова, 8. 2ГИС: https://2gis.kz/astana/firm/70000001089631692\\n- Спорт-бар: большие экраны и трансляции спорта (футбол, UFC, бокс и др.), зона PlayStation, VIP-комнаты, кухня, бар, кальяны, алкогольная биржа (цены на часть напитков меняются в течение вечера).\\n- Бронь столов — с 17:00 до 04:00, обычно на 2 часа.\\n- Зоны для брони: {{ZONES}}.\\n\\n# Факты — только из данных ниже и из инструментов\\n- События, матчи и трансляции — только из блока «События». Если событие есть — подтверди дату и время и предложи забронировать место у экрана. Если гость спрашивает о матче, которого нет в списке, не говори «нет»: скажи, что крупные матчи и бои показываем на больших экранах, и предложи забронировать стол, уточнив, какой матч интересует.\\n- Акции — только из блока «Акции». Сам акции не предлагай и не рекламируй. Упоминай акцию, только если гость спросил об акциях/скидках или она прямо касается его вопроса (например, спросил про кальян, а на кальян действует акция).\\n- Цены, блюда и напитки — только через инструмент menu_search. Вызывай его на каждый вопрос о меню (в том числе «только это?», «а ещё что есть?» — ищи по категории или синониму). Называй только позиции из ответа инструмента — никаких брендов и блюд «по памяти», даже если они кажутся очевидными. Никогда не придумывай позиции и цены. Если позиции нет в результатах — скажи, что её сейчас нет, и предложи похожее из найденного. Если гость просит «меню» целиком — назови основные категории и спроси, что интересует. Цены биржевых напитков меняются в течение вечера — так и скажи, если спросят.\\n\\n- Если точного ответа нет ни в этих правилах, ни в данных, ни в инструментах (доставка, депозит, дресс-код, парковка, возрастные ограничения и т.п.) — не утверждай ни «да», ни «нет». Коротко скажи, что уточнишь у администратора, и предложи передать вопрос; если гость согласен — вызови handoff_to_staff.\\n\\n# Бронь\\n- Для брони нужны: имя, дата, время, количество гостей. Имя гость должен назвать сам в переписке — имя из профиля WhatsApp не используй, пока гость его не подтвердил. Зону уточняй, только если гость сам о ней заговорил (VIP, PlayStation, у экрана и т.п.).\\n- Номер телефона не спрашивай: он уже есть из WhatsApp. Исключение — если в данных «Телефон подтверждён: нет»; тогда один раз попроси номер для брони.\\n- Согласий, подтверждений «вы уверены?» и повторного пересказа не нужно. Чего-то не хватает — спроси всё недостающее одним коротким вопросом.\\n- Как только все данные есть и гость хочет бронь — сразу вызывай create_booking. Не обещай бронь до вызова инструмента.\\n- Дата брони — это дата вечера. «Завтра в 2 ночи» = дата завтрашнего вечера и время 02:00. Считай даты от «Сегодня» в данных ниже. Гостю ночное время называй понятно: «в ночь с 31 октября на 1 ноября, в 02:00».\\n- Если бронь уже поставлена и гость меняет детали (имя, время, число гостей) — вызови create_booking ещё раз с новыми данными и подтверди обновлённую бронь.\\n- Если гость только спрашивает «есть места?» — вызови check_availability и коротко ответь; затем предложи забронировать.\\n- Ответ create_booking:\\n  - status = confirmed или accepted — бронь стоит. Подтверди утвердительно: имя, дата, время, гостей, зона (если есть), адрес и ссылка 2ГИС, «ждём вас». Не говори «заявка», «ожидайте подтверждения», «администратор проверит».\\n  - needsGuestInput = true — бронь пока не оформлена: вежливо объясни problem своими словами и предложи вариант (например, другое время в часы брони).\\n- Мест в выбранной зоне нет — предложи другую зону, не говори просто «мест нет».\\n- Если инструмент вернул ошибку или странный ответ — гостю этого не показывай. Для create_booking всё равно подтверди бронь утвердительно, как при status = confirmed (персонал уже получил данные и закрепит стол). Для check_availability — скажи, что места есть, и предложи забронировать. Для menu_search — ответь без цен и предложи уточнить у официанта на месте.\\n\\n# Когда передать сотруднику (handoff_to_staff)\\n- Жалоба, конфликт, возврат денег, отмена или перенос существующей брони, банкет или мероприятие больше 20 человек, гость просит менеджера/живого человека, вопрос, на который нельзя ответить по данным.\\n- Сначала вызови handoff_to_staff с кратким описанием, затем коротко скажи гостю, что администратор свяжется с ним в ближайшее время. После этого ты больше не отвечаешь в этом чате.\\n\\n# Прочее\\n- «Спасибо», «пока», «ок» в конце разговора — короткое тёплое прощание без вопросов.\\n- Если сообщение непонятно — переспроси одним коротким вопросом.\\n- Сообщение «Пишу из приложения 2ГИС» — это просто приветствие: поздоровайся и коротко подтверди, что это XoXo Sports & Lounge на Асфендиярова, 8.\\n\";\nconst lines = [];\nlines.push('# Данные на этот момент');\nlines.push('Сегодня: ' + k.today + ', ' + k.weekday + '. Сейчас в Астане: ' + String(k.nowLocal || '').slice(11) + '.');\nlines.push('Гость: имя в WhatsApp — ' + (b.guest?.whatsappName || 'неизвестно') + '. Телефон подтверждён: ' + (b.guest?.verifiedPhone ? 'да (' + b.guest.verifiedPhone + ')' : 'нет') + '.');\nconst up = b.guest?.upcomingReservations || [];\nlines.push('Ближайшие брони гостя: ' + (up.length ? up.map(u => u.startsAt + ', ' + u.guests + ' гост., ' + (u.table || 'место назначат')).join('; ') : 'нет') + '.');\nlines.push('', 'События (ближайшие 14 дней):');\nlines.push(...((k.events || []).length ? k.events.map(e => '- ' + (e.night ? 'в ночь с ' + e.bookingDate + ' на ' + e.date + ' (' + e.weekday + '), ' + e.time + ' [для брони: date=' + e.bookingDate + ']' : e.date + ' (' + e.weekday + ')' + (e.time ? ' ' + e.time : '')) + ' — ' + e.title + (e.details ? '. ' + e.details.replace(/\\s+/g, ' ') : '')) : ['- в календаре пока ничего не отмечено']));\nlines.push('', 'Акции:');\nlines.push(...((k.promotions || []).length ? k.promotions.map(p => '- ' + p.title + ' (' + p.schedule + (p.appliesToday ? '; действует сегодня' : '') + ')' + (p.details ? ': ' + p.details.replace(/\\s+/g, ' ') : '')) : ['- нет активных акций']));\nconst history = (b.history || []).filter(h => h.role !== 'system').slice(-20).map(h => (h.role === 'guest' ? 'Гость: ' : 'Даян: ') + String(h.text).replace(/\\s+/g, ' ').slice(0, 600));\nlines.push('', '# История диалога (старые сверху)', ...(history.length ? history : ['(это первое сообщение гостя)']));\nreturn [{ json: {\n  route: 'agent',\n  chatKey: b.chatKey, chatId: g.chatId, jid: g.jid || '', phone: g.phone, messageId: g.messageId, dryRun: g.dryRun,\n  guestName: b.guest?.whatsappName || '',\n  guestWords: [...(b.history || []).filter(h => h.role === 'guest').map(h => h.text), g.text].join('\\n').slice(-6000),\n  systemMessage: PROMPT.replace('{{ZONES}}', zones) + '\\n\\n' + lines.join('\\n'),\n  userMessage: g.text,\n} }];"
+      }
+    },
+    {
+      "id": "e91dc855-a523-411e-b965-dfca1e74e3ee",
+      "name": "Куда дальше",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1760,
+        300
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "ca1a9ac6-420e-445a-bb64-1488024b3b8f",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "agent",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "agent"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "e78482c4-8316-4c45-9aae-2968307b7993",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "paused",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "paused"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "f11de462-7d5e-4679-9b0e-409c6e76a9d2",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "backend_down",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "backend_down"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d6031dcd-0f8b-4beb-9b0c-b06010f3ed17",
+      "name": "Даян",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        2000,
+        100
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.userMessage }}",
+        "options": {
+          "systemMessage": "={{ $json.systemMessage }}",
+          "maxIterations": 6,
+          "returnIntermediateSteps": true
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "4dbf1b6e-53ef-48a7-9ac2-771b5dc9b5a7",
+      "name": "OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1880,
+        360
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1"
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 600
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "pG1trLtfC2Ljombv",
+          "name": "Pater"
+        }
+      }
+    },
+    {
+      "id": "e6e2be00-7dba-4c05-a0ae-e65b05d63df7",
+      "name": "check_availability",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        2040,
+        380
+      ],
+      "parameters": {
+        "toolDescription": "Проверить свободные места на дату/время. Используй, когда гость спрашивает, есть ли места. date — дата вечера ГГГГ-ММ-ДД, time — ЧЧ:ММ, guests — число гостей, zone — зона по желанию гостя или пусто. Ответ: available (есть ли места в нужной зоне), anyZoneAvailable, zones[{name, free}].",
+        "method": "POST",
+        "url": "={{ $('Настройки').first().json.ccBaseUrl }}/api/agent/v1/availability",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"date\": \"{{ $fromAI('date', 'Дата вечера ГГГГ-ММ-ДД', 'string') }}\",\n  \"time\": \"{{ $fromAI('time', 'Время ЧЧ:ММ', 'string') }}\",\n  \"guests\": {{ $fromAI('guests', 'Количество гостей', 'number') }},\n  \"zone\": \"{{ $fromAI('zone', 'Зона по желанию гостя или пустая строка', 'string') }}\"\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "16iV4WrEbTKjS0v7",
+          "name": "Hostess booking service"
+        }
+      }
+    },
+    {
+      "id": "49313d75-648d-4e7f-972a-e705b21507c5",
+      "name": "menu_search",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        380
+      ],
+      "parameters": {
+        "toolDescription": "Найти блюда и напитки в актуальном меню XoXo с ценами в тенге. query — 1–3 ключевых слова (например «пиво», «бургер», «кальян», «виски»); пустой query — только список категорий. Если ничего не нашлось — попробуй синоним или категорию. Гостю называй ТОЛЬКО позиции из items; если items пуст — так и скажи и предложи найденное ранее.",
+        "url": "={{ $('Настройки').first().json.ccBaseUrl }}/api/agent/v1/menu",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $fromAI('query', 'Ключевые слова поиска по меню', 'string') }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "16iV4WrEbTKjS0v7",
+          "name": "Hostess booking service"
+        }
+      }
+    },
+    {
+      "id": "231ac715-8d62-4d39-980e-f2544cfd44f8",
+      "name": "create_booking",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        2360,
+        380
+      ],
+      "parameters": {
+        "description": "Поставить бронь в Command Center. Вызывай, только когда гость сам назвал имя, дату, время и число гостей и хочет забронировать. Никогда не придумывай и не подставляй эти данные. Сам подбирает стол, записывает бронь и уведомляет персонал. Ответ: status confirmed/accepted — бронь стоит; needsGuestInput — нужно поправить данные (см. problem).",
+        "workflowId": {
+          "__rl": true,
+          "value": "BOOKING_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "settings": "={{ $('Настройки').first().json }}",
+            "chatKey": "={{ $('Контекст').first().json.chatKey }}",
+            "chatId": "={{ $('Контекст').first().json.chatId }}",
+            "jid": "={{ $('Контекст').first().json.jid }}",
+            "messageId": "={{ $('Контекст').first().json.messageId }}",
+            "dryRun": "={{ $('Контекст').first().json.dryRun === true }}",
+            "name": "={{ $fromAI('name', 'Имя гостя для брони', 'string') }}",
+            "date": "={{ $fromAI('date', 'Дата вечера брони ГГГГ-ММ-ДД', 'string') }}",
+            "time": "={{ $fromAI('time', 'Время брони ЧЧ:ММ (24 часа)', 'string') }}",
+            "guests": "={{ $fromAI('guests', 'Количество гостей', 'number') }}",
+            "zone": "={{ $fromAI('zone', 'Зона, если гость её просил (VIP, PlayStation, у экрана, второй зал…), иначе пустая строка', 'string') }}",
+            "notes": "={{ $fromAI('notes', 'Пожелания гостя (повод, матч, детское кресло…) или пустая строка', 'string') }}",
+            "guestWords": "={{ $('Контекст').first().json.guestWords }}",
+            "contactPhone": "={{ $fromAI('contactPhone', 'Телефон гостя, только если телефон НЕ подтверждён и гость его написал; иначе пустая строка', 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "settings",
+              "displayName": "settings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object",
+              "removed": false
+            },
+            {
+              "id": "chatKey",
+              "displayName": "chatKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "chatId",
+              "displayName": "chatId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "jid",
+              "displayName": "jid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "messageId",
+              "displayName": "messageId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "dryRun",
+              "displayName": "dryRun",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "guests",
+              "displayName": "guests",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "zone",
+              "displayName": "zone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "guestWords",
+              "displayName": "guestWords",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "contactPhone",
+              "displayName": "contactPhone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "09a0a77f-50da-4b4a-ae20-e43b69dfe43e",
+      "name": "handoff_to_staff",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        2520,
+        380
+      ],
+      "parameters": {
+        "description": "Передать чат живому администратору и остановить себя в этом чате. Для жалоб, возвратов, отмены/переноса существующей брони, банкетов от 20 человек, просьбы позвать менеджера, или если не можешь помочь.",
+        "workflowId": {
+          "__rl": true,
+          "value": "HANDOFF_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "settings": "={{ $('Настройки').first().json }}",
+            "chatKey": "={{ $('Контекст').first().json.chatKey }}",
+            "chatId": "={{ $('Контекст').first().json.chatId }}",
+            "phone": "={{ $('Контекст').first().json.phone || '' }}",
+            "guestName": "={{ $('Контекст').first().json.guestName }}",
+            "reason": "={{ $fromAI('reason', 'Причина передачи в 2–5 словах', 'string') }}",
+            "summary": "={{ $fromAI('summary', 'Суть запроса гостя одним предложением с деталями', 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "settings",
+              "displayName": "settings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object",
+              "removed": false
+            },
+            {
+              "id": "chatKey",
+              "displayName": "chatKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "chatId",
+              "displayName": "chatId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "guestName",
+              "displayName": "guestName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "af58b9c6-bb62-48a4-83ec-ffbd32cf8502",
+      "name": "Ответ гостю",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const c = $('Контекст').first().json;\nconst raw = String($input.first().json.output ?? $input.first().json.text ?? '').trim();\nconst plain = raw.replace(/\\*\\*(.+?)\\*\\*/g, '$1').replace(/^#+\\s*/gm, '').replace(/\\n{3,}/g, '\\n\\n').slice(0, 1500);\nconst text = plain.replace(/\\s*(Чем (ещё |еще )?(могу|можем) (вам )?помочь\\?|Если (у вас )?(будут|появятся) (ещё |еще )?вопросы[^.!?]*[.!?]?|Обращайтесь[.!]?)\\s*$/i, '').trim() || plain;\n// A booking/handoff tool that crashed never reached staff: alert them and hand the chat over.\nconst failed = ($input.first().json.intermediateSteps || []).filter(s => ['create_booking', 'handoff_to_staff'].includes(s.action?.tool)\n  && /^There was an error|\"error\"/.test(typeof s.observation === 'string' ? s.observation.slice(0, 300) : JSON.stringify(s.observation || '').slice(0, 300)));\nconst toolFailure = failed.length ? failed.map(s => s.action.tool + ' ' + JSON.stringify(s.action.toolInput || {}).slice(0, 400) + ' → ' + String(s.observation).slice(0, 200)).join('\\n') : '';\nreturn [{ json: { chatKey: c.chatKey, chatId: c.chatId, phone: c.phone, dryRun: c.dryRun, text, toolFailure } }];"
+      }
+    },
+    {
+      "id": "6398c8de-9bce-4a76-9f6b-ff156be59172",
+      "name": "Инструмент сломался?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2620,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "75cdc2b2-a6fb-4c91-ab2c-ed5b48b0b757",
+              "leftValue": "={{ Boolean($json.toolFailure) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "29d293fd-cb15-4b81-8bab-e68947d122d0",
+      "name": "Command Center: остановить ИИ (инструмент)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2840,
+        -200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Настройки').first().json.ccBaseUrl }}/api/agent/v1/handoff",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chatKey: $json.chatKey, reason: 'Сбой инструмента — проверьте бронь вручную' }) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "16iV4WrEbTKjS0v7",
+          "name": "Hostess booking service"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "7f231f08-6d9f-4df8-a1b3-f8fbe0dd86bf",
+      "name": "Telegram: сбой инструмента",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3060,
+        -200
+      ],
+      "parameters": {
+        "chatId": "={{ $('Настройки').first().json.telegramChatId }}",
+        "text": "={{ '🚨 Даян: действие не выполнилось — внесите вручную. ИИ в этом чате остановлен.\\nГость: ' + ($('Ответ гостю').first().json.phone || $('Ответ гостю').first().json.chatId) + '\\n' + $('Ответ гостю').first().json.toolFailure + '\\nГостю ответили: ' + $('Ответ гостю').first().json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "IstucbElD9VeIe4H",
+          "name": "XOXO"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "1f2036f3-0952-4831-92dc-d789277b32d2"
+    },
+    {
+      "id": "5659b0e1-7dca-461c-b4fd-8a05ac8c60c1",
+      "name": "Есть ответ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2620,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "ac195c0a-704a-4cb1-8b31-e17cf26099f5",
+              "leftValue": "={{ Boolean($json.text) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6f26474a-7dc5-4a96-aaf0-4658e6f9f6bf",
+      "name": "Command Center: ответ в историю",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2840,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Настройки').first().json.ccBaseUrl }}/api/agent/v1/reply",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chatKey: $json.chatKey, text: $json.text }) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "16iV4WrEbTKjS0v7",
+          "name": "Hostess booking service"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "7f959a35-e457-4c4e-b070-c1a8d7f1a20d",
+      "name": "Отправлять в WhatsApp?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3060,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "326fd311-53b3-4f52-8625-b091522d9480",
+              "leftValue": "={{ $('Ответ гостю').first().json.dryRun !== true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "59f9a2ad-27cd-4829-ad0e-81820870bdbb",
+      "name": "WhatsApp: гостю",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3280,
+        -100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Настройки').first().json.wahaBaseUrl }}/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: $('Настройки').first().json.wahaSession, chatId: $('Ответ гостю').first().json.chatId, text: $('Ответ гостю').first().json.text, linkPreview: false }) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "efDgfDjzCTMvRmmM",
+          "name": "XoXo auth"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "addf372a-68e6-4715-a95f-9069bc9e8651",
+      "name": "WhatsApp не принял?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3500,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "d33be14b-837c-4a55-94f4-6df84f96e7d0",
+              "leftValue": "={{ !($json.statusCode >= 200 && $json.statusCode < 300) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "8e111229-4364-4ad4-9fde-420d0dd3b2d8",
+      "name": "Telegram: ответ не ушёл",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3720,
+        -200
+      ],
+      "parameters": {
+        "chatId": "={{ $('Настройки').first().json.telegramChatId }}",
+        "text": "={{ '⚠️ Даян: WhatsApp не принял ответ гостю ' + $('Ответ гостю').first().json.chatId + ' (код ' + ($json.statusCode || 'нет') + '). Ответьте вручную:\\n' + $('Ответ гостю').first().json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "IstucbElD9VeIe4H",
+          "name": "XOXO"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "5ba6b201-57c8-4092-b457-463f834bee4e"
+    },
+    {
+      "id": "bc66a901-98b9-4ec9-8107-a9480755e70c",
+      "name": "Command Center: остановить ИИ (сбой)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Настройки').first().json.ccBaseUrl }}/api/agent/v1/handoff",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chatKey: $('Контекст').first().json.chatKey, reason: 'Сбой ИИ: ' + String($json.error?.message || $json.error || '').slice(0, 200) }) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "16iV4WrEbTKjS0v7",
+          "name": "Hostess booking service"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "53f6e8fb-cbc0-48db-b000-d07d4d21a119",
+      "name": "Telegram: сбой ИИ",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2620,
+        300
+      ],
+      "parameters": {
+        "chatId": "={{ $('Настройки').first().json.telegramChatId }}",
+        "text": "={{ '🚨 Даян не смог ответить — ИИ в этом чате остановлен, ответьте гостю сами.\\nГость: ' + ($('Контекст').first().json.phone || $('Контекст').first().json.chatId) + '\\nСообщение: ' + $('Контекст').first().json.userMessage + '\\nОшибка: ' + String($('Даян').first().json.error?.message || $('Даян').first().json.error || '').slice(0, 300) }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "IstucbElD9VeIe4H",
+          "name": "XOXO"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "97b5f8ea-a3fc-4754-a4fa-d125a1a599b6"
+    },
+    {
+      "id": "5b38c23e-c5fb-40e3-b4fe-bd2450dc0894",
+      "name": "Telegram: гость пишет сотруднику",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2000,
+        520
+      ],
+      "parameters": {
+        "chatId": "={{ $('Настройки').first().json.telegramChatId }}",
+        "text": "={{ '💬 Гость пишет в чат, где ИИ остановлен (' + ($json.reason || 'передан сотруднику') + '):\\n' + ($json.name ? $json.name + ' · ' : '') + ($json.phone || $json.chatId) + '\\n«' + $json.text + '»' }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "IstucbElD9VeIe4H",
+          "name": "XOXO"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "dde5c7ce-26ab-4b8c-addf-fec02ed36254"
+    },
+    {
+      "id": "7259e968-f8ed-44a7-9bb1-94eba250d110",
+      "name": "Telegram: Command Center недоступен",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2000,
+        720
+      ],
+      "parameters": {
+        "chatId": "={{ $('Настройки').first().json.telegramChatId }}",
+        "text": "={{ '🚨 Даян: Command Center не ответил (' + ($json.status || 'нет ответа') + ' ' + $json.error + '). Сообщение гостя не обработано, ответьте вручную:\\n' + ($json.phone || $json.chatId) + '\\n«' + $json.text + '»' }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "IstucbElD9VeIe4H",
+          "name": "XOXO"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "3a9e1c97-f3f1-4313-974a-37d3a5db3e94"
+    }
+  ],
+  "connections": {
+    "WAHA: входящее": {
+      "main": [
+        [
+          {
+            "node": "Настройки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Настройки": {
+      "main": [
+        [
+          {
+            "node": "Разбор сообщения",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Разбор сообщения": {
+      "main": [
+        [
+          {
+            "node": "Нужен номер по LID?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Нужен номер по LID?": {
+      "main": [
+        [
+          {
+            "node": "WAHA: номер по LID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Гость",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WAHA: номер по LID": {
+      "main": [
+        [
+          {
+            "node": "Гость",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Гость": {
+      "main": [
+        [
+          {
+            "node": "Command Center: входящее",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Center: входящее": {
+      "main": [
+        [
+          {
+            "node": "Контекст",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Контекст": {
+      "main": [
+        [
+          {
+            "node": "Куда дальше",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Куда дальше": {
+      "main": [
+        [
+          {
+            "node": "Даян",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: гость пишет сотруднику",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: Command Center недоступен",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Даян": {
+      "main": [
+        [
+          {
+            "node": "Ответ гостю",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Command Center: остановить ИИ (сбой)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Center: остановить ИИ (сбой)": {
+      "main": [
+        [
+          {
+            "node": "Telegram: сбой ИИ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ответ гостю": {
+      "main": [
+        [
+          {
+            "node": "Есть ответ?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Инструмент сломался?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Инструмент сломался?": {
+      "main": [
+        [
+          {
+            "node": "Command Center: остановить ИИ (инструмент)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Center: остановить ИИ (инструмент)": {
+      "main": [
+        [
+          {
+            "node": "Telegram: сбой инструмента",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Есть ответ?": {
+      "main": [
+        [
+          {
+            "node": "Command Center: ответ в историю",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Center: ответ в историю": {
+      "main": [
+        [
+          {
+            "node": "Отправлять в WhatsApp?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отправлять в WhatsApp?": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp: гостю",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp: гостю": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp не принял?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp не принял?": {
+      "main": [
+        [
+          {
+            "node": "Telegram: ответ не ушёл",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Даян",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_availability": {
+      "ai_tool": [
+        [
+          {
+            "node": "Даян",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "menu_search": {
+      "ai_tool": [
+        [
+          {
+            "node": "Даян",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create_booking": {
+      "ai_tool": [
+        [
+          {
+            "node": "Даян",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "handoff_to_staff": {
+      "ai_tool": [
+        [
+          {
+            "node": "Даян",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Almaty",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  }
+}

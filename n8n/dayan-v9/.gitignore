@@ -1,0 +1,3 @@
+# Test builds point at a temporary tunnel and a test credential.
+*.test.json
+ids.test.json
