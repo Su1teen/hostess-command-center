@@ -17,7 +17,9 @@ import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as MenuRouteImport } from './routes/menu'
 import { Route as HealthRouteImport } from './routes/health'
 import { Route as GuestsRouteImport } from './routes/guests'
+import { Route as EventsRouteImport } from './routes/events'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as AgentRouteImport } from './routes/agent'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TablesQrRouteImport } from './routes/tables.qr'
 
@@ -61,9 +63,19 @@ const GuestsRoute = GuestsRouteImport.update({
   path: '/guests',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EventsRoute = EventsRouteImport.update({
+  id: '/events',
+  path: '/events',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentRoute = AgentRouteImport.update({
+  id: '/agent',
+  path: '/agent',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -79,7 +91,9 @@ const TablesQrRoute = TablesQrRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/agent': typeof AgentRoute
   '/dashboard': typeof DashboardRoute
+  '/events': typeof EventsRoute
   '/guests': typeof GuestsRoute
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
@@ -92,7 +106,9 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/agent': typeof AgentRoute
   '/dashboard': typeof DashboardRoute
+  '/events': typeof EventsRoute
   '/guests': typeof GuestsRoute
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
@@ -106,7 +122,9 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/agent': typeof AgentRoute
   '/dashboard': typeof DashboardRoute
+  '/events': typeof EventsRoute
   '/guests': typeof GuestsRoute
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
@@ -121,7 +139,9 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/agent'
     | '/dashboard'
+    | '/events'
     | '/guests'
     | '/health'
     | '/menu'
@@ -134,7 +154,9 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/agent'
     | '/dashboard'
+    | '/events'
     | '/guests'
     | '/health'
     | '/menu'
@@ -147,7 +169,9 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/agent'
     | '/dashboard'
+    | '/events'
     | '/guests'
     | '/health'
     | '/menu'
@@ -161,7 +185,9 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AgentRoute: typeof AgentRoute
   DashboardRoute: typeof DashboardRoute
+  EventsRoute: typeof EventsRoute
   GuestsRoute: typeof GuestsRoute
   HealthRoute: typeof HealthRoute
   MenuRoute: typeof MenuRoute
@@ -231,11 +257,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GuestsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/events': {
+      id: '/events'
+      path: '/events'
+      fullPath: '/events'
+      preLoaderRoute: typeof EventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agent': {
+      id: '/agent'
+      path: '/agent'
+      fullPath: '/agent'
+      preLoaderRoute: typeof AgentRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -257,7 +297,9 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AgentRoute: AgentRoute,
   DashboardRoute: DashboardRoute,
+  EventsRoute: EventsRoute,
   GuestsRoute: GuestsRoute,
   HealthRoute: HealthRoute,
   MenuRoute: MenuRoute,

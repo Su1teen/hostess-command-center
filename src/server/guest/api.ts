@@ -4,6 +4,7 @@ import { getById } from "../repositories/reservations.repository";
 import { handleDiningApi, guestDiningSummary } from "../dine-in/api";
 import { handleShiftRead } from "../dine-in/shift";
 import { handleFloorApi } from "../floor/api";
+import { handleAgentApi } from "../agent/api";
 import { mergeDiningGuest, mergeVerifiedStaffGuests } from "../dine-in/loyalty";
 import { z } from "zod";
 import { HALL_TABLES, TV_SCREENS, FLOOR_WIDTH, FLOOR_HEIGHT } from "../../lib/hall/layout";
@@ -197,6 +198,8 @@ async function reservationList(
 }
 
 export async function handleBookingApi(request: Request): Promise<Response | null> {
+  const agent = await handleAgentApi(request);
+  if (agent) return agent;
   const shift = await handleShiftRead(request);
   if (shift) return shift;
   const floor = await handleFloorApi(request);

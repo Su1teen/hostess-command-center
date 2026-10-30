@@ -1,0 +1,195 @@
+{
+  "name": "Даян v9 · 3 · Передать сотруднику",
+  "nodes": [
+    {
+      "id": "fcdb90bf-7588-495a-9953-94840038ba29",
+      "name": "Старт",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "settings",
+              "type": "object"
+            },
+            {
+              "name": "chatKey",
+              "type": "string"
+            },
+            {
+              "name": "chatId",
+              "type": "string"
+            },
+            {
+              "name": "phone",
+              "type": "string"
+            },
+            {
+              "name": "guestName",
+              "type": "string"
+            },
+            {
+              "name": "reason",
+              "type": "string"
+            },
+            {
+              "name": "summary",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "f800536f-0b47-4cd0-9737-b539cea122f7",
+      "name": "Настройки",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify($('Старт').first().json.settings) }}",
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "36301fd4-5a43-4857-a4b7-097873153d4c",
+      "name": "Command Center: остановить ИИ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Настройки').first().json.ccBaseUrl }}/api/agent/v1/handoff",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chatKey: $('Старт').first().json.chatKey, reason: String($('Старт').first().json.reason || 'нужен сотрудник').slice(0, 500) }) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "16iV4WrEbTKjS0v7",
+          "name": "Hostess booking service"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "cc325ab8-614b-463e-b011-96c263f72e28",
+      "name": "Telegram: нужен сотрудник",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "chatId": "={{ $('Настройки').first().json.telegramChatId }}",
+        "text": "={{ (() => { const s = $('Старт').first().json; const digits = String(s.phone || s.chatId || '').replace(/\\D/g, ''); return '🙋 Даян передал чат сотруднику — ИИ в нём остановлен.\\nПричина: ' + (s.reason || '—') + '\\nСуть: ' + (s.summary || '—') + '\\nГость: ' + (s.guestName || '—') + ' · ' + (s.phone || s.chatId) + (digits.length === 11 ? '\\nНаписать: https://wa.me/' + digits : '') + '\\nВернуть ИИ: Command Center → Даян → чат → «Вернуть ИИ».'; })() }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "IstucbElD9VeIe4H",
+          "name": "XOXO"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "924a91f1-04a6-47f2-969d-c052ae115f5c"
+    },
+    {
+      "id": "5c10d7b6-8f5c-4d4c-8f38-02f6a89a999c",
+      "name": "Ответ агенту",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true, instruction: 'Чат передан администратору. Коротко скажи гостю, что администратор скоро с ним свяжется. Больше ничего не обещай.' } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Старт": {
+      "main": [
+        [
+          {
+            "node": "Настройки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Настройки": {
+      "main": [
+        [
+          {
+            "node": "Command Center: остановить ИИ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Center: остановить ИИ": {
+      "main": [
+        [
+          {
+            "node": "Telegram: нужен сотрудник",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: нужен сотрудник": {
+      "main": [
+        [
+          {
+            "node": "Ответ агенту",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Almaty",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  }
+}

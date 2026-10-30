@@ -9,11 +9,14 @@ import {
   QrCode,
   ChartNoAxesCombined,
   Truck,
+  Bot,
+  PartyPopper,
 } from "lucide-react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import * as Dropdown from "@radix-ui/react-dropdown-menu";
 import { useOperations } from "../orders/ServiceOperations";
 import { useStaffRole } from "../../lib/dine-in-client";
+import { useAgentConversations } from "../agent/AgentScreen";
 
 const items = [
   { to: "/shift", label: "Смена", icon: LayoutDashboard },
@@ -21,6 +24,8 @@ const items = [
   { to: "/orders", label: "Заказы", icon: ShoppingBag },
 ] as const;
 const more = [
+  { to: "/agent", label: "Даян · WhatsApp", icon: Bot },
+  { to: "/events", label: "Афиша и акции", icon: PartyPopper },
   { to: "/reservations", label: "Бронирования", icon: CalendarDays },
   { to: "/guests", label: "Гости", icon: Users },
   { to: "/menu", label: "Меню", icon: Utensils },
@@ -33,6 +38,7 @@ export function BottomNav() {
   const operations = useOperations();
   const role = useStaffRole();
   const links = more.filter((item) => !("manager" in item) || role === "manager");
+  const waiting = useAgentConversations().data?.conversations.filter((c) => c.paused).length ?? 0;
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   return (
     <nav
@@ -70,7 +76,14 @@ export function BottomNav() {
         <Dropdown.Trigger
           className={`flex min-h-16 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-3 py-2 text-[11px] font-medium lg:hidden ${!items.some((i) => i.to === pathname) ? "bg-slate-900 text-white" : "text-slate-500"}`}
         >
-          <MoreHorizontal size={19} />
+          <span className="relative">
+            <MoreHorizontal size={19} />
+            {waiting > 0 && (
+              <span className="absolute -right-2 -top-1.5 rounded-full bg-amber-400 px-1 text-[10px] font-bold text-slate-900">
+                {waiting}
+              </span>
+            )}
+          </span>
           Ещё
         </Dropdown.Trigger>
         <Dropdown.Portal>
@@ -88,6 +101,11 @@ export function BottomNav() {
                 >
                   <Icon size={17} />
                   {label}
+                  {to === "/agent" && waiting > 0 && (
+                    <span className="ml-auto rounded-full bg-amber-400 px-2 text-xs font-bold text-slate-900">
+                      {waiting}
+                    </span>
+                  )}
                 </Link>
               </Dropdown.Item>
             ))}
@@ -103,6 +121,11 @@ export function BottomNav() {
           >
             <Icon size={17} />
             {label}
+            {to === "/agent" && waiting > 0 && (
+              <span className="ml-auto rounded-full bg-amber-400 px-2 text-xs font-bold text-slate-900">
+                {waiting}
+              </span>
+            )}
           </Link>
         ))}
       </div>

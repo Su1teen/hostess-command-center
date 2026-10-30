@@ -925,3 +925,168 @@ test("first ownership verification replays same result only for proven owner wit
   );
   expect((await api("/identity", payload, wa)).status).toBe(403);
 });
+
+describe("Dayan agent API", () => {
+  const agent = async (path: string, body?: unknown, auth = true) => {
+    const response = (await handleBookingApi(
+      new Request(`https://command.test/api/agent/v1${path}`, {
+        method: body ? "POST" : "GET",
+        headers: {
+          ...(auth ? { "x-hostess-service-key": waKey } : {}),
+          ...(body ? { "content-type": "application/json" } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      }),
+    ))!;
+    return { status: response.status, data: await response.json() };
+  };
+  const evening = (days: number) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).format(
+      new Date(Date.now() + days * 86400_000),
+    );
+  const chat = "70000000501@c.us",
+    chatKey = `XoXo:${chat}`;
+
+  test("requires the WhatsApp service key", async () => {
+    expect((await agent("/knowledge", undefined, false)).status).toBe(401);
+    const staff = await handleBookingApi(
+      new Request("https://command.test/api/staff/v1/agent/events"),
+    );
+    expect(staff!.status).toBe(401);
+  });
+
+  test("records inbound once, keeps history and respects a staff pause", async () => {
+    const message = {
+      session: "XoXo",
+      chatId: chat,
+      messageId: "agent-m1",
+      text: "Привет",
+      phone: "+70000000501",
+    };
+    const first = await agent("/inbound", message);
+    expect(first.data).toMatchObject({ accepted: true, paused: false, chatKey });
+    expect(first.data.knowledge.today).toBe(evening(0));
+    expect((await agent("/inbound", message)).data).toMatchObject({
+      accepted: false,
+      duplicate: true,
+    });
+    expect((await agent("/reply", { chatKey, text: "Здравствуйте!" })).status).toBe(200);
+    await agent("/handoff", { chatKey, reason: "жалоба" });
+    const next = await agent("/inbound", { ...message, messageId: "agent-m2", text: "ау" });
+    expect(next.data.paused).toBe(true);
+    expect(next.data.history.map((h: { role: string }) => h.role)).toEqual([
+      "guest",
+      "agent",
+      "system",
+    ]);
+  });
+
+  test("books server-side: zone wish, idempotent replay, night times, closed hours", async () => {
+    const vip = (await pool.query("SELECT id FROM venue_zones WHERE code='vip'")).rows[0].id;
+    await pool.query("UPDATE venue_resources SET zone_id=$1 WHERE code='12'", [vip]);
+    const date = evening(20);
+    const request = {
+      chatKey,
+      idempotencyKey: "agent-book-1",
+      jid: chat,
+      name: "Арман",
+      date,
+      time: "20:00",
+      guests: 4,
+      zone: "вип",
+    };
+    const booked = await agent("/bookings", request);
+    expect(booked.status).toBe(201);
+    expect(booked.data).toMatchObject({
+      status: "confirmed",
+      tableName: "Стол 12",
+      zoneMatched: true,
+      phone: "+70000000501",
+    });
+    const replay = await agent("/bookings", request);
+    expect(replay.data.reservationId).toBe(booked.data.reservationId);
+    const row = (
+      await pool.query("SELECT source,status,guests FROM command_center_reservations WHERE id=$1", [
+        booked.data.reservationId,
+      ])
+    ).rows[0];
+    expect(row).toMatchObject({ source: "whatsapp", status: "expected", guests: 4 });
+
+    const night = await agent("/bookings", {
+      ...request,
+      idempotencyKey: "agent-book-night",
+      date: evening(21),
+      time: "01:00",
+      zone: null,
+    });
+    expect(night.status).toBe(201);
+    expect(Date.parse(night.data.startsAt)).toBe(Date.parse(`${evening(22)}T01:00:00+05:00`));
+    expect(Date.parse(night.data.endsAt) - Date.parse(night.data.startsAt)).toBe(7200_000);
+
+    const closed = await agent("/bookings", {
+      ...request,
+      idempotencyKey: "agent-book-closed",
+      time: "13:00",
+    });
+    expect(closed.status).toBe(422);
+    expect(closed.data.error.code).toBe("CLOSED");
+  });
+
+  test("a correction replaces the evening's booking instead of duplicating it", async () => {
+    const date = evening(23);
+    const base = { chatKey, jid: chat, name: "Ерлан", date, time: "21:00", guests: 6 };
+    const first = await agent("/bookings", { ...base, idempotencyKey: "agent-fix-1" });
+    const second = await agent("/bookings", {
+      ...base,
+      idempotencyKey: "agent-fix-2",
+      time: "22:00",
+      guests: 8,
+    });
+    expect(second.data).toMatchObject({ status: "confirmed", replacedPrevious: true, guests: 8 });
+    const old = (
+      await pool.query("SELECT status FROM command_center_reservations WHERE id=$1", [
+        first.data.reservationId,
+      ])
+    ).rows[0];
+    expect(old.status).toBe("cancelled");
+  });
+
+  test("queues a staff request when nothing can be assigned automatically", async () => {
+    const client = await pool.connect();
+    let disabled: string[] = [];
+    try {
+      disabled = (
+        await client.query(
+          "UPDATE venue_resources SET is_reservable=false WHERE venue_code='xoxo' AND is_reservable RETURNING id",
+        )
+      ).rows.map((r) => r.id);
+      const queued = await agent("/bookings", {
+        chatKey,
+        idempotencyKey: "agent-queue-1",
+        jid: null,
+        contactPhone: "+70000000777",
+        name: "Алия",
+        date: evening(24),
+        time: "19:00",
+        guests: 2,
+      });
+      expect(queued.status).toBe(201);
+      expect(queued.data).toMatchObject({
+        status: "requested",
+        phoneVerified: false,
+        reservationId: null,
+      });
+      const pending = (
+        await pool.query("SELECT status FROM guest_booking_requests WHERE id=$1", [
+          queued.data.requestId,
+        ])
+      ).rows[0];
+      expect(pending.status).toBe("pending");
+    } finally {
+      await client.query("UPDATE venue_resources SET is_reservable=true WHERE id=ANY($1::uuid[])", [
+        disabled,
+      ]);
+      client.release();
+    }
+  });
+});
