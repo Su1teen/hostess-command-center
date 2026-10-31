@@ -205,7 +205,7 @@ const out = { ok: true, status: 'accepted', groupText: '', telegramText: '', pau
 if (status === 201 && b.status === 'confirmed') {
   out.status = 'confirmed';
   out.groupText = (b.replacedPrevious ? '🔄 Бронь изменена гостем (WhatsApp · Даян)\\n' : '✅ Новая бронь (WhatsApp · Даян)\\n') + who + '\\n' + when + '\\nЗона: ' + (b.zoneName || '—') + '\\nМесто: ' + (b.tableName || '—') + (b.notes ? '\\nКомментарий: ' + b.notes : '') + (b.requestedZone && !b.zoneMatched ? '\\n⚠️ Гость хотел: ' + b.requestedZone : '');
-  out.booking = { name: b.name, date: b.date, time: b.time, guests: b.guests, zone: b.zoneName, place: b.tableName };
+  out.booking = { name: b.name, when: b.when, guests: b.guests, zone: b.zoneName };
 } else if (status === 201 && b.status === 'requested') {
   out.telegramText = '🕓 Даян: стол не назначился автоматически — заявка в Command Center (Смена → Заявки на бронирование). Назначьте место.\\n' + who + '\\n' + when + (b.requestedZone ? '\\nПожелание: ' + b.requestedZone : '') + '\\nЧат: ' + s.chatId;
   out.booking = { name: b.name, date: b.date, time: b.time, guests: b.guests };
@@ -277,7 +277,7 @@ return [{ json: out }];`,
     node("Ответ агенту", "n8n-nodes-base.code", 2, [2420, 300], {
       jsCode: `const r = $('Проверка уведомлений').first().json;
 if (r.needsGuestInput) return [{ json: { ok: false, needsGuestInput: true, problem: r.problem } }];
-return [{ json: { ok: true, status: r.status, booking: r.booking, instruction: 'Бронь стоит. Подтверди гостю утвердительно: дата, время, гостей' + (r.status === 'confirmed' ? ', зона' : '') + ', адрес и ссылка 2ГИС.' } }];`,
+return [{ json: { ok: true, status: r.status, booking: r.booking, instruction: 'Бронь стоит. Одним коротким сообщением подтверди гостю: имя, когда (называй время ровно так: «' + (r.booking && r.booking.when) + '»), сколько гостей' + (r.status === 'confirmed' ? ', зона' : '') + ', адрес и ссылка 2ГИС. Условия по деньгам — только если они есть в афише на эту дату.' } }];`,
     }),
   ];
   link(c, "Старт", "Настройки");
@@ -312,33 +312,107 @@ function handoffWorkflow() {
       ["guestName", "string"],
       ["reason", "string"],
       ["summary", "string"],
+      ["pause", "boolean"],
     ]),
     settingsFromInput([220, 300]),
+    ifNode("Остановить ИИ?", [440, 300], "={{ $('Старт').first().json.pause !== false }}"),
     ccHttp(
       "Command Center: остановить ИИ",
-      [440, 300],
+      [660, 200],
       "POST",
       "/api/agent/v1/handoff",
       "={{ JSON.stringify({ chatKey: $('Старт').first().json.chatKey, reason: String($('Старт').first().json.reason || 'нужен сотрудник').slice(0, 500) }) }}",
     ),
     telegram(
       "Telegram: нужен сотрудник",
-      [660, 300],
-      "={{ (() => { const s = $('Старт').first().json; const digits = String(s.phone || s.chatId || '').replace(/\\D/g, ''); return '🙋 Даян передал чат сотруднику — ИИ в нём остановлен.\\nПричина: ' + (s.reason || '—') + '\\nСуть: ' + (s.summary || '—') + '\\nГость: ' + (s.guestName || '—') + ' · ' + (s.phone || s.chatId) + (digits.length === 11 ? '\\nНаписать: https://wa.me/' + digits : '') + '\\nВернуть ИИ: Command Center → Даян → чат → «Вернуть ИИ».'; })() }}",
+      [880, 300],
+      "={{ (() => { const s = $('Старт').first().json; const paused = s.pause !== false; const digits = String(s.phone || s.chatId || '').replace(/\\D/g, ''); return (paused ? '🙋 Даян передал чат сотруднику — ИИ в нём остановлен.\\nПричина: ' : '❓ Гость спросил то, чего Даян не знает. ИИ в чате продолжает отвечать.\\nВопрос: ') + (s.reason || '—') + '\\nСуть: ' + (s.summary || '—') + '\\nГость: ' + (s.guestName || '—') + ' · ' + (s.phone || s.chatId) + (digits.length === 11 ? '\\nНаписать: https://wa.me/' + digits : '') + (paused ? '\\nВернуть ИИ: Command Center → Даян → чат → «Вернуть ИИ».' : ''); })() }}",
     ),
-    node("Ответ агенту", "n8n-nodes-base.code", 2, [880, 300], {
-      jsCode: `return [{ json: { ok: true, instruction: 'Чат передан администратору. Коротко скажи гостю, что администратор скоро с ним свяжется. Больше ничего не обещай.' } }];`,
+    node("Ответ агенту", "n8n-nodes-base.code", 2, [1100, 300], {
+      jsCode: `const paused = $('Старт').first().json.pause !== false;
+return [{ json: { ok: true, instruction: paused
+  ? 'Чат передан администратору. Одной фразой скажи гостю, что администратор скоро ему напишет. Больше ничего не обещай.'
+  : 'Вопрос передан администратору. Скажи гостю одной фразой, что уточнишь это у администратора. Ты продолжаешь отвечать в чате.' } }];`,
     }),
   ];
   link(c, "Старт", "Настройки");
-  link(c, "Настройки", "Command Center: остановить ИИ");
+  link(c, "Настройки", "Остановить ИИ?");
+  link(c, "Остановить ИИ?", "Command Center: остановить ИИ", 0);
+  link(c, "Остановить ИИ?", "Telegram: нужен сотрудник", 1);
   link(c, "Command Center: остановить ИИ", "Telegram: нужен сотрудник");
   link(c, "Telegram: нужен сотрудник", "Ответ агенту");
   return workflow(`${prefix} · 3 · Передать сотруднику`, nodes, c);
 }
 
+// ========================= Sub-workflow: invoice request =========================
+function invoiceWorkflow() {
+  const c = {};
+  const nodes = [
+    trigger([
+      ["settings", "object"],
+      ["chatKey", "string"],
+      ["chatId", "string"],
+      ["phone", "string"],
+      ["guestName", "string"],
+      ["details", "string"],
+    ]),
+    settingsFromInput([220, 300]),
+    node("Сообщение", "n8n-nodes-base.code", 2, [440, 300], {
+      jsCode: `const s = $('Старт').first().json;
+const cfg = $('Настройки').first().json;
+const digits = String(s.phone || s.chatId || '').replace(/\\D/g, '');
+const text = '💳 Гость просит счёт на депозит\\nИмя: ' + (s.guestName || '—') + '\\nТелефон: ' + (s.phone || s.chatId) + '\\nЧто: ' + (s.details || '—') + '\\nВыставите счёт и отправьте гостю в WhatsApp' + (digits.length === 11 ? ': https://wa.me/' + digits : '.');
+return [{ json: { text, sendGroup: !cfg.testMode, telegramText: cfg.testMode ? '🧪 ТЕСТ — в общий чат ушло бы:\\n' + text : text } }];`,
+    }),
+    ifNode("В общий чат?", [660, 300], "={{ $json.sendGroup === true }}"),
+    node(
+      "WhatsApp: общий чат",
+      "n8n-nodes-base.httpRequest",
+      4.2,
+      [880, 200],
+      {
+        method: "POST",
+        url: "={{ $('Настройки').first().json.wahaBaseUrl }}/api/sendText",
+        authentication: "genericCredentialType",
+        genericAuthType: "httpHeaderAuth",
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody:
+          "={{ JSON.stringify({ session: $('Настройки').first().json.wahaSession, chatId: $('Настройки').first().json.staffGroupId, text: $('Сообщение').first().json.text, linkPreview: false }) }}",
+        options: {
+          timeout: 20000,
+          response: { response: { fullResponse: true, neverError: true } },
+        },
+      },
+      {
+        credentials: credentials.waha,
+        retryOnFail: true,
+        maxTries: 2,
+        waitBetweenTries: 2000,
+        onError: "continueRegularOutput",
+      },
+    ),
+    telegram(
+      "Telegram: администраторам",
+      [1100, 300],
+      "={{ $('Сообщение').first().json.telegramText }}",
+    ),
+    node("Ответ агенту", "n8n-nodes-base.code", 2, [1320, 300], {
+      jsCode: `return [{ json: { ok: true, instruction: 'Запрос счёта передан администраторам, счёт пришлют гостю в этот чат. Скажи одной фразой, что бронь закреплена и счёт скоро придёт сюда.' } }];`,
+    }),
+  ];
+  link(c, "Старт", "Настройки");
+  link(c, "Настройки", "Сообщение");
+  link(c, "Сообщение", "В общий чат?");
+  link(c, "В общий чат?", "WhatsApp: общий чат", 0);
+  link(c, "В общий чат?", "Telegram: администраторам", 1);
+  link(c, "WhatsApp: общий чат", "Telegram: администраторам");
+  link(c, "Telegram: администраторам", "Ответ агенту");
+  return workflow(`${prefix} · 4 · Счёт на депозит`, nodes, c);
+}
+
 // ========================= Main: WhatsApp inbound =========================
-function mainWorkflow(bookingId, handoffId) {
+function mainWorkflow(bookingId, handoffId, invoiceId) {
   const prompt = readFileSync(new URL("./prompt.md", dir), "utf8");
   const c = {};
   const toolInputs = (fields) => ({
@@ -499,7 +573,7 @@ return [{ json: {
       [1880, 360],
       {
         model: { __rl: true, value: "gpt-4.1", mode: "list", cachedResultName: "gpt-4.1" },
-        options: { temperature: 0.3, maxTokens: 600 },
+        options: { temperature: 0.5, maxTokens: 600 },
       },
       { credentials: credentials.openai },
     ),
@@ -583,7 +657,7 @@ return [{ json: {
     }),
     node("handoff_to_staff", "@n8n/n8n-nodes-langchain.toolWorkflow", 2.2, [2520, 380], {
       description:
-        "Передать чат живому администратору и остановить себя в этом чате. Для жалоб, возвратов, отмены/переноса существующей брони, банкетов от 20 человек, просьбы позвать менеджера, или если не можешь помочь.",
+        "Передать вопрос администратору. pause=true — остановить себя в этом чате (жалоба, возврат денег, отмена брони, банкет от 20 человек, просьба позвать менеджера). pause=false — ты продолжаешь отвечать (разовый вопрос, на который ты не знаешь ответа: парковка, доставка, дресс-код и т.п.).",
       workflowId: { __rl: true, value: handoffId, mode: "id" },
       workflowInputs: toolInputs([
         ["settings", "object", "={{ $('Настройки').first().json }}"],
@@ -597,19 +671,67 @@ return [{ json: {
           "string",
           "={{ $fromAI('summary', 'Суть запроса гостя одним предложением с деталями', 'string') }}",
         ],
+        [
+          "pause",
+          "boolean",
+          "={{ $fromAI('pause', 'true — остановить ИИ в этом чате; false — продолжать отвечать', 'boolean') }}",
+        ],
+      ]),
+    }),
+    node("request_invoice", "@n8n/n8n-nodes-langchain.toolWorkflow", 2.2, [2680, 380], {
+      description:
+        "Запросить счёт на депозит. Вызывай ТОЛЬКО если у события на дату брони указан депозит и гость просит счёт или ссылку на оплату. Бронь при этом ставится как обычно (create_booking). Сообщение уходит в общий чат и в Telegram, счёт гостю пришлют вручную.",
+      workflowId: { __rl: true, value: invoiceId, mode: "id" },
+      workflowInputs: toolInputs([
+        ["settings", "object", "={{ $('Настройки').first().json }}"],
+        ["chatKey", "string", `={{ ${ctx}.chatKey }}`],
+        ["chatId", "string", `={{ ${ctx}.chatId }}`],
+        ["phone", "string", `={{ ${ctx}.phone || '' }}`],
+        ["guestName", "string", "={{ $fromAI('guestName', 'Имя гостя', 'string') }}"],
+        [
+          "details",
+          "string",
+          "={{ $fromAI('details', 'Событие, дата и время, число гостей и сумма депозита как в афише, например: Эль-Класико, 1 ноября 01:00, 6 гостей, депозит 5000 ₸ с человека', 'string') }}",
+        ],
       ]),
     }),
     node("Ответ гостю", "n8n-nodes-base.code", 2, [2400, 100], {
       jsCode: `const c = $('Контекст').first().json;
 const raw = String($input.first().json.output ?? $input.first().json.text ?? '').trim();
-const plain = raw.replace(/\\*\\*(.+?)\\*\\*/g, '$1').replace(/^#+\\s*/gm, '').replace(/\\n{3,}/g, '\\n\\n').slice(0, 1500);
-const text = plain.replace(/\\s*(Чем (ещё |еще )?(могу|можем) (вам )?помочь\\?|Если (у вас )?(будут|появятся) (ещё |еще )?вопросы[^.!?]*[.!?]?|Обращайтесь[.!]?)\\s*$/i, '').trim() || plain;
+const silent = /^\s*NO_REPLY\s*$/.test(raw);
+const plain = silent ? '' : raw.replace(/\\*\\*(.+?)\\*\\*/g, '$1').replace(/^#+\\s*/gm, '').replace(/\\n{3,}/g, '\\n\\n').slice(0, 1500);
+const text = silent ? '' : plain.replace(/\\s*(Чем (ещё |еще )?(могу|можем) (вам )?помочь\\?|Если (у вас )?(будут|появятся) (ещё |еще )?вопросы[^.!?]*[.!?]?|Обращайтесь[.!]?)\\s*$/i, '').trim() || plain;
 // A booking/handoff tool that crashed never reached staff: alert them and hand the chat over.
-const failed = ($input.first().json.intermediateSteps || []).filter(s => ['create_booking', 'handoff_to_staff'].includes(s.action?.tool)
+const failed = ($input.first().json.intermediateSteps || []).filter(s => ['create_booking', 'handoff_to_staff', 'request_invoice'].includes(s.action?.tool)
   && /^There was an error|"error"/.test(typeof s.observation === 'string' ? s.observation.slice(0, 300) : JSON.stringify(s.observation || '').slice(0, 300)));
-const toolFailure = failed.length ? failed.map(s => s.action.tool + ' ' + JSON.stringify(s.action.toolInput || {}).slice(0, 400) + ' → ' + String(s.observation).slice(0, 200)).join('\\n') : '';
-return [{ json: { chatKey: c.chatKey, chatId: c.chatId, phone: c.phone, dryRun: c.dryRun, text, toolFailure } }];`,
+const used = new Set(($input.first().json.intermediateSteps || []).map(s => s.action?.tool));
+// The agent must never promise an invoice it did not request.
+const promisedInvoice = /счёт|счет|invoice/i.test(text) && !used.has('request_invoice');
+// A booking confirmation without create_booking is a hallucination: retry the agent once, then alert staff.
+const claimsBooking = /(записал[аи]?(?![а-я])|забронирован\S*|бронь (поставлена|оформлена|подтверждена|стоит)|брондалды|брондап қойдым)/i.test(text);
+let retried = false; try { $('Даян (повтор)').first(); retried = true; } catch (e) {}
+const retry = claimsBooking && !used.has('create_booking') && !retried;
+const unconfirmed = claimsBooking && !used.has('create_booking') && retried;
+const toolFailure = unconfirmed ? 'гостю подтверждена бронь, но create_booking не вызван' : promisedInvoice ? 'request_invoice не вызван, а гостю обещан счёт на депозит' : failed.length ? failed.map(s => s.action.tool + ' ' + JSON.stringify(s.action.toolInput || {}).slice(0, 400) + ' → ' + String(s.observation).slice(0, 200)).join('\\n') : '';
+return [{ json: { chatKey: c.chatKey, chatId: c.chatId, phone: c.phone, dryRun: c.dryRun, text, toolFailure: retry ? '' : toolFailure, retry } }];`,
     }),
+    ifNode("Повторить попытку?", [2520, 100], "={{ $json.retry === true }}"),
+    node(
+      "Даян (повтор)",
+      "@n8n/n8n-nodes-langchain.agent",
+      2.2,
+      [2520, 320],
+      {
+        promptType: "define",
+        text: `={{ ${ctx}.userMessage }}`,
+        options: {
+          systemMessage: `={{ ${ctx}.systemMessage + '\\n\\nВАЖНО: в прошлой попытке ты подтвердил гостю бронь, не вызвав create_booking, поэтому она не записана. Если данные для брони есть в диалоге — сначала вызови create_booking, и только потом пиши гостю подтверждение. Если данных не хватает — не подтверждай, спроси недостающее.' }}`,
+          maxIterations: 6,
+          returnIntermediateSteps: true,
+        },
+      },
+      { onError: "continueErrorOutput", retryOnFail: true, maxTries: 2, waitBetweenTries: 2000 },
+    ),
     ifNode("Инструмент сломался?", [2620, -100], "={{ Boolean($json.toolFailure) }}"),
     ccHttp(
       "Command Center: остановить ИИ (инструмент)",
@@ -621,7 +743,7 @@ return [{ json: { chatKey: c.chatKey, chatId: c.chatId, phone: c.phone, dryRun: 
     telegram(
       "Telegram: сбой инструмента",
       [3060, -200],
-      "={{ '🚨 Даян: действие не выполнилось — внесите вручную. ИИ в этом чате остановлен.\\nГость: ' + ($('Ответ гостю').first().json.phone || $('Ответ гостю').first().json.chatId) + '\\n' + $('Ответ гостю').first().json.toolFailure + '\\nГостю ответили: ' + $('Ответ гостю').first().json.text }}",
+      "={{ '🚨 Даян: действие не выполнилось — внесите вручную. ИИ в этом чате остановлен.\\nГость: ' + ($('Ответ гостю').last().json.phone || $('Ответ гостю').last().json.chatId) + '\\n' + $('Ответ гостю').last().json.toolFailure + '\\nГостю ответили: ' + $('Ответ гостю').last().json.text }}",
     ),
     ifNode("Есть ответ?", [2620, 100], "={{ Boolean($json.text) }}"),
     ccHttp(
@@ -634,7 +756,7 @@ return [{ json: { chatKey: c.chatKey, chatId: c.chatId, phone: c.phone, dryRun: 
     ifNode(
       "Отправлять в WhatsApp?",
       [3060, 0],
-      "={{ $('Ответ гостю').first().json.dryRun !== true }}",
+      "={{ $('Ответ гостю').last().json.dryRun !== true }}",
     ),
     node(
       "WhatsApp: гостю",
@@ -649,7 +771,7 @@ return [{ json: { chatKey: c.chatKey, chatId: c.chatId, phone: c.phone, dryRun: 
         sendBody: true,
         specifyBody: "json",
         jsonBody:
-          "={{ JSON.stringify({ session: $('Настройки').first().json.wahaSession, chatId: $('Ответ гостю').first().json.chatId, text: $('Ответ гостю').first().json.text, linkPreview: false }) }}",
+          "={{ JSON.stringify({ session: $('Настройки').first().json.wahaSession, chatId: $('Ответ гостю').last().json.chatId, text: $('Ответ гостю').last().json.text, linkPreview: false }) }}",
         options: {
           timeout: 20000,
           response: { response: { fullResponse: true, neverError: true } },
@@ -671,7 +793,7 @@ return [{ json: { chatKey: c.chatKey, chatId: c.chatId, phone: c.phone, dryRun: 
     telegram(
       "Telegram: ответ не ушёл",
       [3720, -200],
-      "={{ '⚠️ Даян: WhatsApp не принял ответ гостю ' + $('Ответ гостю').first().json.chatId + ' (код ' + ($json.statusCode || 'нет') + '). Ответьте вручную:\\n' + $('Ответ гостю').first().json.text }}",
+      "={{ '⚠️ Даян: WhatsApp не принял ответ гостю ' + $('Ответ гостю').last().json.chatId + ' (код ' + ($json.statusCode || 'нет') + '). Ответьте вручную:\\n' + $('Ответ гостю').last().json.text }}",
     ),
     ccHttp(
       "Command Center: остановить ИИ (сбой)",
@@ -683,7 +805,7 @@ return [{ json: { chatKey: c.chatKey, chatId: c.chatId, phone: c.phone, dryRun: 
     telegram(
       "Telegram: сбой ИИ",
       [2620, 300],
-      `={{ '🚨 Даян не смог ответить — ИИ в этом чате остановлен, ответьте гостю сами.\\nГость: ' + (${ctx}.phone || ${ctx}.chatId) + '\\nСообщение: ' + ${ctx}.userMessage + '\\nОшибка: ' + String($('Даян').first().json.error?.message || $('Даян').first().json.error || '').slice(0, 300) }}`,
+      `={{ '🚨 Даян не смог ответить — ИИ в этом чате остановлен, ответьте гостю сами.\\nГость: ' + (${ctx}.phone || ${ctx}.chatId) + '\\nСообщение: ' + ${ctx}.userMessage + '\\nОшибка: ' + String($json.body?.pausedReason || '').slice(0, 300) }}`,
     ),
     telegram(
       "Telegram: гость пишет сотруднику",
@@ -711,8 +833,12 @@ return [{ json: { chatKey: c.chatKey, chatId: c.chatId, phone: c.phone, dryRun: 
   link(c, "Даян", "Ответ гостю", 0);
   link(c, "Даян", "Command Center: остановить ИИ (сбой)", 1);
   link(c, "Command Center: остановить ИИ (сбой)", "Telegram: сбой ИИ");
-  link(c, "Ответ гостю", "Есть ответ?");
-  link(c, "Ответ гостю", "Инструмент сломался?");
+  link(c, "Ответ гостю", "Повторить попытку?");
+  link(c, "Повторить попытку?", "Даян (повтор)", 0);
+  link(c, "Повторить попытку?", "Есть ответ?", 1);
+  link(c, "Повторить попытку?", "Инструмент сломался?", 1);
+  link(c, "Даян (повтор)", "Ответ гостю", 0);
+  link(c, "Даян (повтор)", "Command Center: остановить ИИ (сбой)", 1);
   link(c, "Инструмент сломался?", "Command Center: остановить ИИ (инструмент)", 0);
   link(c, "Command Center: остановить ИИ (инструмент)", "Telegram: сбой инструмента");
   link(c, "Есть ответ?", "Command Center: ответ в историю", 0);
@@ -726,8 +852,18 @@ return [{ json: { chatKey: c.chatKey, chatId: c.chatId, phone: c.phone, dryRun: 
     ["menu_search", "ai_tool"],
     ["create_booking", "ai_tool"],
     ["handoff_to_staff", "ai_tool"],
+    ["request_invoice", "ai_tool"],
   ])
-    c[tool] = { [type]: [[{ node: "Даян", type, index: 0 }]] };
+    c[tool] = {
+      [type]: [
+        [
+          { node: "Даян", type, index: 0 },
+          ...(type === "ai_languageModel" || tool !== "OpenAI"
+            ? [{ node: "Даян (повтор)", type, index: 0 }]
+            : []),
+        ],
+      ],
+    };
   return workflow(`${prefix} · 1 · WhatsApp → ИИ-администратор`, nodes, c);
 }
 
@@ -745,8 +881,13 @@ const out = (file, data) => {
 const suffix = env === "test" ? ".test" : "";
 out(`booking${suffix}.json`, bookingWorkflow());
 out(`handoff${suffix}.json`, handoffWorkflow());
+out(`invoice${suffix}.json`, invoiceWorkflow());
 out(
   `main${suffix}.json`,
-  mainWorkflow(arg("booking-id", "BOOKING_WORKFLOW_ID"), arg("handoff-id", "HANDOFF_WORKFLOW_ID")),
+  mainWorkflow(
+    arg("booking-id", "BOOKING_WORKFLOW_ID"),
+    arg("handoff-id", "HANDOFF_WORKFLOW_ID"),
+    arg("invoice-id", "INVOICE_WORKFLOW_ID"),
+  ),
 );
-console.log(`built ${env}: main${suffix}.json booking${suffix}.json handoff${suffix}.json`);
+console.log(`built ${env}: main${suffix}.json booking handoff invoice`);

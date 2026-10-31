@@ -12,7 +12,7 @@ const env = process.argv.find((a) => a.startsWith("--env="))?.slice(6) ?? "prod"
 const folder = process.argv.find((a) => a.startsWith("--folder-id="))?.slice(12);
 const passthrough = process.argv
   .slice(2)
-  .filter((a) => !/^--(booking-id|handoff-id|folder-id)=/.test(a));
+  .filter((a) => !/^--(booking-id|handoff-id|invoice-id|folder-id)=/.test(a));
 const dir = new URL(".", import.meta.url);
 const suffix = env === "test" ? ".test" : "";
 const idsFile = new URL(`ids${suffix}.json`, dir);
@@ -60,6 +60,11 @@ const build = (extra) =>
 build([]);
 await upsert("booking", `booking${suffix}.json`);
 await upsert("handoff", `handoff${suffix}.json`);
-build([`--booking-id=${ids.booking}`, `--handoff-id=${ids.handoff}`]);
+await upsert("invoice", `invoice${suffix}.json`);
+build([
+  `--booking-id=${ids.booking}`,
+  `--handoff-id=${ids.handoff}`,
+  `--invoice-id=${ids.invoice}`,
+]);
 await upsert("main", `main${suffix}.json`);
 writeFileSync(idsFile, JSON.stringify(ids, null, 2) + "\n");

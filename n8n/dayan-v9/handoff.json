@@ -2,7 +2,7 @@
   "name": "Даян v9 · 3 · Передать сотруднику",
   "nodes": [
     {
-      "id": "fcdb90bf-7588-495a-9953-94840038ba29",
+      "id": "af27d44f-b198-4de5-8077-a31cf11e52b9",
       "name": "Старт",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
@@ -40,13 +40,17 @@
             {
               "name": "summary",
               "type": "string"
+            },
+            {
+              "name": "pause",
+              "type": "boolean"
             }
           ]
         }
       }
     },
     {
-      "id": "f800536f-0b47-4cd0-9737-b539cea122f7",
+      "id": "22dae4be-86f5-4f51-986c-c029181de9b8",
       "name": "Настройки",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -62,13 +66,47 @@
       }
     },
     {
-      "id": "36301fd4-5a43-4857-a4b7-097873153d4c",
+      "id": "fe0ed11c-6028-49de-8685-cd76ca7e07a5",
+      "name": "Остановить ИИ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cff8cfa0-2d2c-4ba2-b2ad-4062673c818a",
+              "leftValue": "={{ $('Старт').first().json.pause !== false }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2ffdb324-13e6-4497-865e-41df1f94da6a",
       "name": "Command Center: остановить ИИ",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        440,
-        300
+        660,
+        200
       ],
       "parameters": {
         "method": "POST",
@@ -100,17 +138,17 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "cc325ab8-614b-463e-b011-96c263f72e28",
+      "id": "80314081-7032-42c1-a4d3-eb4da1c590cc",
       "name": "Telegram: нужен сотрудник",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        660,
+        880,
         300
       ],
       "parameters": {
         "chatId": "={{ $('Настройки').first().json.telegramChatId }}",
-        "text": "={{ (() => { const s = $('Старт').first().json; const digits = String(s.phone || s.chatId || '').replace(/\\D/g, ''); return '🙋 Даян передал чат сотруднику — ИИ в нём остановлен.\\nПричина: ' + (s.reason || '—') + '\\nСуть: ' + (s.summary || '—') + '\\nГость: ' + (s.guestName || '—') + ' · ' + (s.phone || s.chatId) + (digits.length === 11 ? '\\nНаписать: https://wa.me/' + digits : '') + '\\nВернуть ИИ: Command Center → Даян → чат → «Вернуть ИИ».'; })() }}",
+        "text": "={{ (() => { const s = $('Старт').first().json; const paused = s.pause !== false; const digits = String(s.phone || s.chatId || '').replace(/\\D/g, ''); return (paused ? '🙋 Даян передал чат сотруднику — ИИ в нём остановлен.\\nПричина: ' : '❓ Гость спросил то, чего Даян не знает. ИИ в чате продолжает отвечать.\\nВопрос: ') + (s.reason || '—') + '\\nСуть: ' + (s.summary || '—') + '\\nГость: ' + (s.guestName || '—') + ' · ' + (s.phone || s.chatId) + (digits.length === 11 ? '\\nНаписать: https://wa.me/' + digits : '') + (paused ? '\\nВернуть ИИ: Command Center → Даян → чат → «Вернуть ИИ».' : ''); })() }}",
         "additionalFields": {
           "appendAttribution": false,
           "disable_web_page_preview": true
@@ -123,19 +161,19 @@
         }
       },
       "onError": "continueRegularOutput",
-      "webhookId": "924a91f1-04a6-47f2-969d-c052ae115f5c"
+      "webhookId": "a1b57d9f-9c40-40e4-be92-dd6e608cb100"
     },
     {
-      "id": "5c10d7b6-8f5c-4d4c-8f38-02f6a89a999c",
+      "id": "07e4b63d-55aa-4054-8dc7-4640e4a83833",
       "name": "Ответ агенту",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        880,
+        1100,
         300
       ],
       "parameters": {
-        "jsCode": "return [{ json: { ok: true, instruction: 'Чат передан администратору. Коротко скажи гостю, что администратор скоро с ним свяжется. Больше ничего не обещай.' } }];"
+        "jsCode": "const paused = $('Старт').first().json.pause !== false;\nreturn [{ json: { ok: true, instruction: paused\n  ? 'Чат передан администратору. Одной фразой скажи гостю, что администратор скоро ему напишет. Больше ничего не обещай.'\n  : 'Вопрос передан администратору. Скажи гостю одной фразой, что уточнишь это у администратора. Ты продолжаешь отвечать в чате.' } }];"
       }
     }
   ],
@@ -155,7 +193,25 @@
       "main": [
         [
           {
+            "node": "Остановить ИИ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Остановить ИИ?": {
+      "main": [
+        [
+          {
             "node": "Command Center: остановить ИИ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: нужен сотрудник",
             "type": "main",
             "index": 0
           }

@@ -2,7 +2,7 @@
   "name": "Даян v9 · 2 · Бронь в Command Center",
   "nodes": [
     {
-      "id": "43068b7d-b0f8-495b-a25a-83670c650af6",
+      "id": "45813ab3-e18e-42bd-b702-8817d6d8ed51",
       "name": "Старт",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
@@ -74,7 +74,7 @@
       }
     },
     {
-      "id": "a0e4c63c-7d79-4a02-a0a9-5243d0a92efb",
+      "id": "7e9441f0-2871-4974-831d-9af7a8457241",
       "name": "Настройки",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -90,7 +90,7 @@
       }
     },
     {
-      "id": "07c6bcd8-0ed0-4ef3-a632-31faca9e4574",
+      "id": "63453863-2ed6-482a-a3be-1aa6ebaaf9d0",
       "name": "Проверка данных",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -103,7 +103,7 @@
       }
     },
     {
-      "id": "efa3e98a-7b86-48b9-9f93-c44e3fcaa020",
+      "id": "33a0b89b-7a7d-49b0-81ff-c2898273ee15",
       "name": "Данных хватает?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -122,7 +122,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "28a06a02-7a11-4ec3-a726-b8777747e772",
+              "id": "078431bc-8546-4c2c-bf15-0b2047312225",
               "leftValue": "={{ $json.valid === true }}",
               "rightValue": true,
               "operator": {
@@ -137,7 +137,7 @@
       }
     },
     {
-      "id": "e8e0d04f-3530-45f5-92ab-2d5b31e9c5cc",
+      "id": "ae2131c3-1eda-4c06-8586-e7d7e3a92e83",
       "name": "Нужны данные от гостя",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -150,7 +150,7 @@
       }
     },
     {
-      "id": "f7435b27-69d1-4910-b119-c822904f8993",
+      "id": "0a371d35-2eb2-4b42-9404-1e3d204fbf5e",
       "name": "Command Center: бронь",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -188,7 +188,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "76eb57ef-52ed-46fb-8b38-b028266521a4",
+      "id": "820cb4fe-45a5-48d2-aec8-846fabb0b90b",
       "name": "Итог брони",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -197,11 +197,11 @@
         300
       ],
       "parameters": {
-        "jsCode": "const s = $('Старт').first().json;\nconst cfg = $('Настройки').first().json;\nconst r = $input.first().json || {};\nconst status = Number(r.statusCode || 0);\nconst b = r.body && typeof r.body === 'object' ? r.body : {};\nconst err = b.error || {};\nconst dmy = d => String(d || '').split('-').reverse().join('.');\nconst plural = n => n % 10 === 1 && n % 100 !== 11 ? 'гость' : [2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100) ? 'гостя' : 'гостей';\nconst who = 'Имя: ' + (b.name || s.name) + '\\nТелефон: ' + (b.phone || s.contactPhone || s.jid || s.chatId) + (b.phoneVerified === false ? ' (со слов гостя)' : '');\nconst when = 'Дата: ' + dmy(b.date || s.date) + ' в ' + (b.time || s.time) + '\\nГостей: ' + (b.guests || s.guests);\nconst out = { ok: true, status: 'accepted', groupText: '', telegramText: '', pause: false, pauseReason: '' };\nif (status === 201 && b.status === 'confirmed') {\n  out.status = 'confirmed';\n  out.groupText = (b.replacedPrevious ? '🔄 Бронь изменена гостем (WhatsApp · Даян)\\n' : '✅ Новая бронь (WhatsApp · Даян)\\n') + who + '\\n' + when + '\\nЗона: ' + (b.zoneName || '—') + '\\nМесто: ' + (b.tableName || '—') + (b.notes ? '\\nКомментарий: ' + b.notes : '') + (b.requestedZone && !b.zoneMatched ? '\\n⚠️ Гость хотел: ' + b.requestedZone : '');\n  out.booking = { name: b.name, date: b.date, time: b.time, guests: b.guests, zone: b.zoneName, place: b.tableName };\n} else if (status === 201 && b.status === 'requested') {\n  out.telegramText = '🕓 Даян: стол не назначился автоматически — заявка в Command Center (Смена → Заявки на бронирование). Назначьте место.\\n' + who + '\\n' + when + (b.requestedZone ? '\\nПожелание: ' + b.requestedZone : '') + '\\nЧат: ' + s.chatId;\n  out.booking = { name: b.name, date: b.date, time: b.time, guests: b.guests };\n} else if (status === 422 && ['CLOSED', 'INVALID_DATE', 'PHONE_REQUIRED', 'INVALID_INPUT'].includes(err.code)) {\n  return [{ json: { ok: false, needsGuestInput: true, problem: err.code === 'CLOSED' ? 'Бронь возможна только на время с 17:00 до 04:00.' : err.code === 'PHONE_REQUIRED' ? 'Нужен номер телефона гостя.' : err.code === 'INVALID_DATE' ? 'Дата уже прошла или слишком далеко — нужна ближайшая будущая дата.' : 'Проверь имя, дату (ГГГГ-ММ-ДД), время (ЧЧ:ММ) и число гостей.' } }];\n} else {\n  out.pause = true;\n  out.pauseReason = 'Бронь не записалась в Command Center';\n  out.telegramText = '🚨 Даян: бронь НЕ записалась в Command Center — внесите вручную. ИИ в этом чате остановлен.\\n' + who + '\\n' + when + (s.zone ? '\\nЗона: ' + s.zone : '') + (s.notes ? '\\nКомментарий: ' + s.notes : '') + '\\nЧат: ' + s.chatId + '\\nОтвет сервера: ' + (status || 'нет ответа') + ' ' + String(err.code || r.error?.message || '').slice(0, 120);\n  out.booking = { name: s.name, date: s.date, time: s.time, guests: s.guests };\n}\nif (cfg.testMode && out.groupText) out.telegramText = [out.telegramText, '🧪 ТЕСТ — в общий чат ушло бы:\\n' + out.groupText].filter(Boolean).join('\\n\\n');\nout.sendGroup = Boolean(out.groupText) && !cfg.testMode && !s.dryRun;\nreturn [{ json: out }];"
+        "jsCode": "const s = $('Старт').first().json;\nconst cfg = $('Настройки').first().json;\nconst r = $input.first().json || {};\nconst status = Number(r.statusCode || 0);\nconst b = r.body && typeof r.body === 'object' ? r.body : {};\nconst err = b.error || {};\nconst dmy = d => String(d || '').split('-').reverse().join('.');\nconst plural = n => n % 10 === 1 && n % 100 !== 11 ? 'гость' : [2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100) ? 'гостя' : 'гостей';\nconst who = 'Имя: ' + (b.name || s.name) + '\\nТелефон: ' + (b.phone || s.contactPhone || s.jid || s.chatId) + (b.phoneVerified === false ? ' (со слов гостя)' : '');\nconst when = 'Дата: ' + dmy(b.date || s.date) + ' в ' + (b.time || s.time) + '\\nГостей: ' + (b.guests || s.guests);\nconst out = { ok: true, status: 'accepted', groupText: '', telegramText: '', pause: false, pauseReason: '' };\nif (status === 201 && b.status === 'confirmed') {\n  out.status = 'confirmed';\n  out.groupText = (b.replacedPrevious ? '🔄 Бронь изменена гостем (WhatsApp · Даян)\\n' : '✅ Новая бронь (WhatsApp · Даян)\\n') + who + '\\n' + when + '\\nЗона: ' + (b.zoneName || '—') + '\\nМесто: ' + (b.tableName || '—') + (b.notes ? '\\nКомментарий: ' + b.notes : '') + (b.requestedZone && !b.zoneMatched ? '\\n⚠️ Гость хотел: ' + b.requestedZone : '');\n  out.booking = { name: b.name, when: b.when, guests: b.guests, zone: b.zoneName };\n} else if (status === 201 && b.status === 'requested') {\n  out.telegramText = '🕓 Даян: стол не назначился автоматически — заявка в Command Center (Смена → Заявки на бронирование). Назначьте место.\\n' + who + '\\n' + when + (b.requestedZone ? '\\nПожелание: ' + b.requestedZone : '') + '\\nЧат: ' + s.chatId;\n  out.booking = { name: b.name, date: b.date, time: b.time, guests: b.guests };\n} else if (status === 422 && ['CLOSED', 'INVALID_DATE', 'PHONE_REQUIRED', 'INVALID_INPUT'].includes(err.code)) {\n  return [{ json: { ok: false, needsGuestInput: true, problem: err.code === 'CLOSED' ? 'Бронь возможна только на время с 17:00 до 04:00.' : err.code === 'PHONE_REQUIRED' ? 'Нужен номер телефона гостя.' : err.code === 'INVALID_DATE' ? 'Дата уже прошла или слишком далеко — нужна ближайшая будущая дата.' : 'Проверь имя, дату (ГГГГ-ММ-ДД), время (ЧЧ:ММ) и число гостей.' } }];\n} else {\n  out.pause = true;\n  out.pauseReason = 'Бронь не записалась в Command Center';\n  out.telegramText = '🚨 Даян: бронь НЕ записалась в Command Center — внесите вручную. ИИ в этом чате остановлен.\\n' + who + '\\n' + when + (s.zone ? '\\nЗона: ' + s.zone : '') + (s.notes ? '\\nКомментарий: ' + s.notes : '') + '\\nЧат: ' + s.chatId + '\\nОтвет сервера: ' + (status || 'нет ответа') + ' ' + String(err.code || r.error?.message || '').slice(0, 120);\n  out.booking = { name: s.name, date: s.date, time: s.time, guests: s.guests };\n}\nif (cfg.testMode && out.groupText) out.telegramText = [out.telegramText, '🧪 ТЕСТ — в общий чат ушло бы:\\n' + out.groupText].filter(Boolean).join('\\n\\n');\nout.sendGroup = Boolean(out.groupText) && !cfg.testMode && !s.dryRun;\nreturn [{ json: out }];"
       }
     },
     {
-      "id": "9e0798a8-15ab-4b8d-b611-54eb630bb182",
+      "id": "ae4ab3ab-c468-41cb-9f1a-fc4beecd3501",
       "name": "В общий чат?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -220,7 +220,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "ae865fad-ea78-4975-9ab9-2510db1c9ca1",
+              "id": "648f1d20-51c9-444e-9c67-5c033c2e7d50",
               "leftValue": "={{ $json.sendGroup === true }}",
               "rightValue": true,
               "operator": {
@@ -235,7 +235,7 @@
       }
     },
     {
-      "id": "690766ae-7712-4a23-b73b-6c8cc2dfeede",
+      "id": "9622a76e-2df9-4718-b097-18ef0afdb875",
       "name": "WhatsApp: общий чат",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -273,7 +273,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "7063c9c2-1717-4a3c-87ab-e941dfb8d5ea",
+      "id": "7a3d12d2-e1e6-43f6-8d3b-9040ad510705",
       "name": "Проверка уведомлений",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -286,7 +286,7 @@
       }
     },
     {
-      "id": "1ddae7a6-834c-42eb-87eb-894fdb733b25",
+      "id": "9b328f83-edd1-4ec7-8a58-d9960442543b",
       "name": "Нужно остановить ИИ?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -305,7 +305,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "81c9455b-1ca1-49d8-a177-398798bed3e2",
+              "id": "baf1680d-2824-4895-8f51-5fefdce2a1de",
               "leftValue": "={{ $json.pause === true }}",
               "rightValue": true,
               "operator": {
@@ -320,7 +320,7 @@
       }
     },
     {
-      "id": "79a2046f-b648-4137-98e6-2575060ea22c",
+      "id": "9d5632ac-4ad2-4933-948d-9b242917158f",
       "name": "Command Center: остановить ИИ",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -358,7 +358,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "67107abb-22fb-4f65-8715-79eea785e77f",
+      "id": "5e84c519-9341-4648-b738-503e75e1991a",
       "name": "Есть сообщение в Telegram?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -377,7 +377,7 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "699c80d9-e40d-486f-9781-8ddc3c315588",
+              "id": "3702fd81-9da4-4853-ac3b-cd57ab1b1403",
               "leftValue": "={{ Boolean($('Проверка уведомлений').first().json.telegramText) }}",
               "rightValue": true,
               "operator": {
@@ -392,7 +392,7 @@
       }
     },
     {
-      "id": "ff2c743a-5803-4517-a3f9-e9c5a09a1184",
+      "id": "e6b4395d-0388-4366-8f31-832a50cbfee6",
       "name": "Telegram: администраторам",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -415,10 +415,10 @@
         }
       },
       "onError": "continueRegularOutput",
-      "webhookId": "bff355e6-15b8-4005-92c8-4dd6f28f6897"
+      "webhookId": "d353e77f-2d68-40b6-b6e9-d7c1528309bb"
     },
     {
-      "id": "3bd4ca7c-5307-444c-9141-b8490b4262cb",
+      "id": "78429506-4ecd-4478-9a2c-1e242b3c03b8",
       "name": "Ответ агенту",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -427,7 +427,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "const r = $('Проверка уведомлений').first().json;\nif (r.needsGuestInput) return [{ json: { ok: false, needsGuestInput: true, problem: r.problem } }];\nreturn [{ json: { ok: true, status: r.status, booking: r.booking, instruction: 'Бронь стоит. Подтверди гостю утвердительно: дата, время, гостей' + (r.status === 'confirmed' ? ', зона' : '') + ', адрес и ссылка 2ГИС.' } }];"
+        "jsCode": "const r = $('Проверка уведомлений').first().json;\nif (r.needsGuestInput) return [{ json: { ok: false, needsGuestInput: true, problem: r.problem } }];\nreturn [{ json: { ok: true, status: r.status, booking: r.booking, instruction: 'Бронь стоит. Одним коротким сообщением подтверди гостю: имя, когда (называй время ровно так: «' + (r.booking && r.booking.when) + '»), сколько гостей' + (r.status === 'confirmed' ? ', зона' : '') + ', адрес и ссылка 2ГИС. Условия по деньгам — только если они есть в афише на эту дату.' } }];"
       }
     }
   ],

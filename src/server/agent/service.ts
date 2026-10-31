@@ -198,6 +198,47 @@ export async function checkAvailability(raw: unknown) {
   };
 }
 
+const monthsGenitive = [
+  "января",
+  "февраля",
+  "марта",
+  "апреля",
+  "мая",
+  "июня",
+  "июля",
+  "августа",
+  "сентября",
+  "октября",
+  "ноября",
+  "декабря",
+];
+const weekdaysLong = [
+  "воскресенье",
+  "понедельник",
+  "вторник",
+  "среду",
+  "четверг",
+  "пятницу",
+  "субботу",
+];
+/** Guest-facing phrase for a service-day date and local time; after-midnight slots read as "в ночь с X на Y". */
+export function whenText(date: string, time: string, today = astanaDate()) {
+  const day = (key: string) =>
+    `${Number(key.slice(8))} ${monthsGenitive[Number(key.slice(5, 7)) - 1]}`;
+  const next = new Date(Date.parse(`${date}T00:00:00Z`) + 86400_000).toISOString().slice(0, 10);
+  if (time < "17:00") {
+    const from = Number(date.slice(8)),
+      sameMonth = date.slice(5, 7) === next.slice(5, 7);
+    return `в ночь с ${sameMonth ? from : day(date)} на ${day(next)}, ${time}`;
+  }
+  const diff = Math.round(
+    (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400_000,
+  );
+  const weekday = weekdaysLong[new Date(`${date}T00:00:00Z`).getUTCDay()];
+  const lead = diff === 0 ? "сегодня" : diff === 1 ? "завтра" : `в ${weekday}`;
+  return `${lead}, ${day(date)}, ${time}`;
+}
+
 export const bookingSchema = z
   .object({
     chatKey,
@@ -281,6 +322,7 @@ type AgentBooking = {
   zoneMatched: boolean;
   notes: string | null;
   replacedPrevious: boolean;
+  when: string;
   replayed?: boolean;
 };
 
@@ -327,12 +369,19 @@ export async function createAgentBooking(raw: unknown): Promise<AgentBooking> {
         [replaced.map((r) => r.request_id).filter(Boolean)],
       );
     }
+    // Default seating order: halls with screens first, the PlayStation corner and bar after them.
+    const rank = (code: string) => {
+      const known = ["first_hall", "second_hall", "ps", "bar"].indexOf(code);
+      return known === -1 ? 9 : known;
+    };
     const zones = (
-      await client.query(
-        `SELECT id,code,name,zone_type FROM venue_zones WHERE venue_code='xoxo' AND is_active
-         ORDER BY display_order`,
-      )
-    ).rows as { id: string; code: string; name: string; zone_type: string }[];
+      (
+        await client.query(
+          `SELECT id,code,name,zone_type FROM venue_zones WHERE venue_code='xoxo' AND is_active
+           ORDER BY display_order`,
+        )
+      ).rows as { id: string; code: string; name: string; zone_type: string }[]
+    ).sort((a, b) => rank(a.code) - rank(b.code));
     const wanted = preferredZoneCodes(input.zone);
     const preferred = zones.filter((z) => wanted.includes(z.code) || wanted.includes(z.zone_type));
     // Without an explicit wish, VIP rooms are offered last: they are a premium upsell.
@@ -372,6 +421,7 @@ export async function createAgentBooking(raw: unknown): Promise<AgentBooking> {
       requestedZone: input.zone ?? null,
       notes: input.notes ?? null,
       replacedPrevious: replaced.length > 0,
+      when: whenText(input.date, input.time),
     };
     await actor(client, `whatsapp:${guest.guestId}`);
     if (resource) {

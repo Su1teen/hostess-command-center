@@ -1,0 +1,267 @@
+{
+  "name": "Даян v9 · 4 · Счёт на депозит",
+  "nodes": [
+    {
+      "id": "b5bc4d39-a202-4233-a435-7a678660e40b",
+      "name": "Старт",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "settings",
+              "type": "object"
+            },
+            {
+              "name": "chatKey",
+              "type": "string"
+            },
+            {
+              "name": "chatId",
+              "type": "string"
+            },
+            {
+              "name": "phone",
+              "type": "string"
+            },
+            {
+              "name": "guestName",
+              "type": "string"
+            },
+            {
+              "name": "details",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "6e62c403-89d4-4bb3-b001-ece0e94d3fdd",
+      "name": "Настройки",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify($('Старт').first().json.settings) }}",
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "9c477f7f-4ee5-44f2-be31-091f41ecb186",
+      "name": "Сообщение",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const s = $('Старт').first().json;\nconst cfg = $('Настройки').first().json;\nconst digits = String(s.phone || s.chatId || '').replace(/\\D/g, '');\nconst text = '💳 Гость просит счёт на депозит\\nИмя: ' + (s.guestName || '—') + '\\nТелефон: ' + (s.phone || s.chatId) + '\\nЧто: ' + (s.details || '—') + '\\nВыставите счёт и отправьте гостю в WhatsApp' + (digits.length === 11 ? ': https://wa.me/' + digits : '.');\nreturn [{ json: { text, sendGroup: !cfg.testMode, telegramText: cfg.testMode ? '🧪 ТЕСТ — в общий чат ушло бы:\\n' + text : text } }];"
+      }
+    },
+    {
+      "id": "fcd399fc-fe50-402d-8e28-9b4fdf437a4d",
+      "name": "В общий чат?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f69eb859-798a-44b9-9f2d-d287195a9a0a",
+              "leftValue": "={{ $json.sendGroup === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d317abef-fca9-4093-be55-0e34400e00c8",
+      "name": "WhatsApp: общий чат",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Настройки').first().json.wahaBaseUrl }}/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session: $('Настройки').first().json.wahaSession, chatId: $('Настройки').first().json.staffGroupId, text: $('Сообщение').first().json.text, linkPreview: false }) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "efDgfDjzCTMvRmmM",
+          "name": "XoXo auth"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "13ffbcc0-0ebe-4714-adc4-cc23fa1a1f84",
+      "name": "Telegram: администраторам",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "chatId": "={{ $('Настройки').first().json.telegramChatId }}",
+        "text": "={{ $('Сообщение').first().json.telegramText }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "IstucbElD9VeIe4H",
+          "name": "XOXO"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "676746b2-a0e5-4cd0-9a78-629ec192d672"
+    },
+    {
+      "id": "f040fab4-3ba1-458c-b22e-1bce6960a84b",
+      "name": "Ответ агенту",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true, instruction: 'Запрос счёта передан администраторам, счёт пришлют гостю в этот чат. Скажи одной фразой, что бронь закреплена и счёт скоро придёт сюда.' } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Старт": {
+      "main": [
+        [
+          {
+            "node": "Настройки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Настройки": {
+      "main": [
+        [
+          {
+            "node": "Сообщение",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сообщение": {
+      "main": [
+        [
+          {
+            "node": "В общий чат?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "В общий чат?": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp: общий чат",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: администраторам",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp: общий чат": {
+      "main": [
+        [
+          {
+            "node": "Telegram: администраторам",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: администраторам": {
+      "main": [
+        [
+          {
+            "node": "Ответ агенту",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Almaty",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  }
+}

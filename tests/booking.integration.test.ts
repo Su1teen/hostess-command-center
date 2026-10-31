@@ -1020,6 +1020,7 @@ describe("Dayan agent API", () => {
       zone: null,
     });
     expect(night.status).toBe(201);
+    expect(night.data.when).toMatch(/^в ночь с \d+ (\S+ )?на \d+ \S+, 01:00$/);
     expect(Date.parse(night.data.startsAt)).toBe(Date.parse(`${evening(22)}T01:00:00+05:00`));
     expect(Date.parse(night.data.endsAt) - Date.parse(night.data.startsAt)).toBe(7200_000);
 
