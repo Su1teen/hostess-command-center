@@ -46,8 +46,24 @@ N8N_URL=... N8N_API_KEY=... node n8n/dayan-v9/deploy.mjs --env=prod
 
 Тестовое сообщение с `"_test": true` в теле вебхука проходит весь путь, но не отправляется в WhatsApp.
 
-Перед публикацией продакшн-версии:
-1. Command Center уже на продакшне (миграция `0016_agent_knowledge.sql`, API `/api/agent/v1/*`).
-2. Выключить старый workflow `Даян · XoXo v8.1` (тот же webhook `xoxo-waha`).
-3. Опубликовать все четыре workflow v9: сначала 2, 3 и 4 (sub-workflow должны быть опубликованы), затем 1.
-4. В узле «Настройки» основного workflow `testMode: false` — брони идут в общий чат.
+## Включение и откат
+
+Боевой стенд подготовлен: на Railway всё есть (`WHATSAPP_SERVICE_KEY`, база, миграция `0016`), WAHA шлёт `message.any`
+на `/webhook/xoxo-waha`, все четыре workflow лежат в папке n8n «Даян v9 · XoXo» выключенными.
+
+```bash
+# 1. предполётная проверка (только чтение): ключ, места, меню, WhatsApp-сессия, общий чат
+N8N_URL=https://... N8N_API_KEY=... node n8n/dayan-v9/preflight.mjs
+
+# 2. включить: сначала 2, 3, 4, потом 1 (отказывается, если на /webhook/xoxo-waha уже слушает другой workflow)
+N8N_URL=https://... N8N_API_KEY=... node n8n/dayan-v9/activate.mjs --on
+
+# откат: сначала 1, потом остальные (гостям перестаёт отвечать ИИ, брони в Command Center остаются)
+N8N_URL=https://... N8N_API_KEY=... node n8n/dayan-v9/activate.mjs --off
+```
+
+То же руками в n8n: опубликовать 2, 3 и 4, затем 1. Старый `Даян · XoXo v8.1` оставить выключенным (тот же webhook).
+
+После включения: написать боту с телефона, проверить ответ, бронь в Command Center и сообщение в общем чате «Брони».
+Если ответа нет — смотреть Executions основного workflow; тревоги по сбоям приходят в Telegram.
+Перед стартом заполнить «Ещё → Афиша и акции» (событий и акций в базе пока нет).
