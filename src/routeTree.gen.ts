@@ -13,6 +13,7 @@ import { Route as SuppliersRouteImport } from './routes/suppliers'
 import { Route as ShiftRouteImport } from './routes/shift'
 import { Route as SalesRouteImport } from './routes/sales'
 import { Route as ReservationsRouteImport } from './routes/reservations'
+import { Route as RegularsRouteImport } from './routes/regulars'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as MenuRouteImport } from './routes/menu'
 import { Route as HealthRouteImport } from './routes/health'
@@ -41,6 +42,11 @@ const SalesRoute = SalesRouteImport.update({
 const ReservationsRoute = ReservationsRouteImport.update({
   id: '/reservations',
   path: '/reservations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RegularsRoute = RegularsRouteImport.update({
+  id: '/regulars',
+  path: '/regulars',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrdersRoute = OrdersRouteImport.update({
@@ -98,6 +104,7 @@ export interface FileRoutesByFullPath {
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
   '/orders': typeof OrdersRoute
+  '/regulars': typeof RegularsRoute
   '/reservations': typeof ReservationsRoute
   '/sales': typeof SalesRoute
   '/shift': typeof ShiftRoute
@@ -113,6 +120,7 @@ export interface FileRoutesByTo {
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
   '/orders': typeof OrdersRoute
+  '/regulars': typeof RegularsRoute
   '/reservations': typeof ReservationsRoute
   '/sales': typeof SalesRoute
   '/shift': typeof ShiftRoute
@@ -129,6 +137,7 @@ export interface FileRoutesById {
   '/health': typeof HealthRoute
   '/menu': typeof MenuRoute
   '/orders': typeof OrdersRoute
+  '/regulars': typeof RegularsRoute
   '/reservations': typeof ReservationsRoute
   '/sales': typeof SalesRoute
   '/shift': typeof ShiftRoute
@@ -146,6 +155,7 @@ export interface FileRouteTypes {
     | '/health'
     | '/menu'
     | '/orders'
+    | '/regulars'
     | '/reservations'
     | '/sales'
     | '/shift'
@@ -161,6 +171,7 @@ export interface FileRouteTypes {
     | '/health'
     | '/menu'
     | '/orders'
+    | '/regulars'
     | '/reservations'
     | '/sales'
     | '/shift'
@@ -176,6 +187,7 @@ export interface FileRouteTypes {
     | '/health'
     | '/menu'
     | '/orders'
+    | '/regulars'
     | '/reservations'
     | '/sales'
     | '/shift'
@@ -192,6 +204,7 @@ export interface RootRouteChildren {
   HealthRoute: typeof HealthRoute
   MenuRoute: typeof MenuRoute
   OrdersRoute: typeof OrdersRoute
+  RegularsRoute: typeof RegularsRoute
   ReservationsRoute: typeof ReservationsRoute
   SalesRoute: typeof SalesRoute
   ShiftRoute: typeof ShiftRoute
@@ -227,6 +240,13 @@ declare module '@tanstack/react-router' {
       path: '/reservations'
       fullPath: '/reservations'
       preLoaderRoute: typeof ReservationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/regulars': {
+      id: '/regulars'
+      path: '/regulars'
+      fullPath: '/regulars'
+      preLoaderRoute: typeof RegularsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/orders': {
@@ -304,6 +324,7 @@ const rootRouteChildren: RootRouteChildren = {
   HealthRoute: HealthRoute,
   MenuRoute: MenuRoute,
   OrdersRoute: OrdersRoute,
+  RegularsRoute: RegularsRoute,
   ReservationsRoute: ReservationsRoute,
   SalesRoute: SalesRoute,
   ShiftRoute: ShiftRoute,

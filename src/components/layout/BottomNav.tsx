@@ -11,6 +11,7 @@ import {
   Truck,
   Bot,
   PartyPopper,
+  Crown,
 } from "lucide-react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import * as Dropdown from "@radix-ui/react-dropdown-menu";
@@ -28,6 +29,7 @@ const more = [
   { to: "/events", label: "Афиша и акции", icon: PartyPopper },
   { to: "/reservations", label: "Бронирования", icon: CalendarDays },
   { to: "/guests", label: "Гости", icon: Users },
+  { to: "/regulars", label: "Постоянники", icon: Crown, manager: true },
   { to: "/menu", label: "Меню", icon: Utensils },
   { to: "/tables/qr", label: "Столы и QR", icon: QrCode },
   { to: "/dashboard", label: "Аналитика", icon: ChartNoAxesCombined, manager: true },

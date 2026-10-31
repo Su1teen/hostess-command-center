@@ -10,6 +10,8 @@ import {
 import { HALL_TABLES } from "../src/lib/hall/layout";
 import { handleBookingApi } from "../src/server/guest/api";
 import { pool } from "../src/server/db/pool";
+import { newSession } from "../src/server/guest/auth";
+import { walletView } from "../src/server/dine-in/loyalty";
 
 const config = process.env.TEST_BOOKING_DATABASE_URL;
 if (
@@ -1089,5 +1091,158 @@ describe("Dayan agent API", () => {
       ]);
       client.release();
     }
+  });
+});
+
+describe("Regulars and broadcasts", () => {
+  let manager = "";
+  let operator = "";
+  const regulars = async (
+    path: string,
+    init: { method?: string; body?: unknown; cookie?: string; origin?: boolean } = {},
+  ) => {
+    const response = (await handleBookingApi(
+      new Request(`https://command.test/api/staff/v1/regulars${path}`, {
+        method: init.method ?? (init.body ? "POST" : "GET"),
+        headers: {
+          ...(init.cookie === "" ? {} : { cookie: init.cookie ?? manager }),
+          ...(init.origin === false ? {} : { origin: "https://command.test" }),
+          ...(init.body ? { "content-type": "application/json" } : {}),
+        },
+        ...(init.body ? { body: JSON.stringify(init.body) } : {}),
+      }),
+    ))!;
+    return { status: response.status, data: await response.json() };
+  };
+  const balance = async (guestId: string) => {
+    const client = await pool.connect();
+    try {
+      const v = (await client.query("SELECT id FROM hostess_venues WHERE slug='xoxo'")).rows[0];
+      return (await walletView(client, v.id, guestId)).balanceMinor;
+    } finally {
+      client.release();
+    }
+  };
+  const cookieFor = async (role: string) => {
+    const client = await pool.connect();
+    try {
+      return (await newSession(client, null, `tester-${role}`, role)).split(";")[0];
+    } finally {
+      client.release();
+    }
+  };
+  beforeAll(async () => {
+    manager = await cookieFor("manager");
+    operator = await cookieFor("operator");
+  });
+
+  test("only a signed-in manager can use the section", async () => {
+    expect((await regulars("", { cookie: "" })).status).toBe(401);
+    expect((await regulars("", { cookie: operator })).status).toBe(403);
+    expect(
+      (await regulars("", { body: { name: "Нет", phone: "+77015559999" }, cookie: operator }))
+        .status,
+    ).toBe(403);
+    expect(
+      (await regulars("", { body: { name: "Нет", phone: "+77015559999" }, origin: false })).status,
+    ).toBe(403);
+  });
+
+  test("a new regular gets 300 bonus that appears in the real account after WhatsApp sign-in", async () => {
+    const created = await regulars("", { body: { name: "Айгерим", phone: "8 701 555 00 01" } });
+    expect(created.status).toBe(201);
+    let list = (await regulars("?q=Айгерим")).data.regulars;
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({
+      phone: "+77015550001",
+      balanceMinor: "30000",
+      signedIn: false,
+      active: true,
+    });
+    const duplicate = await regulars("", { body: { name: "Другая", phone: "+7 (701) 555-00-01" } });
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.data.error.code).toBe("ALREADY_REGULAR");
+
+    // The guest scans the QR / signs in through WhatsApp with the same number.
+    const wa = { wa: true, jid: "77015550001@c.us" };
+    const identity = await api("/identity", { name: "Айгерим", jid: wa.jid, consent: true }, wa);
+    expect(identity.status).toBe(200);
+    expect(await balance(identity.data.guestId)).toBe(30000);
+    list = (await regulars("?q=701 555 00 01")).data.regulars;
+    expect(list[0]).toMatchObject({ balanceMinor: "30000", signedIn: true });
+  });
+
+  test("an already verified guest becomes a regular without a second account", async () => {
+    const wa = { wa: true, jid: "77015550002@c.us" };
+    const identity = await api("/identity", { name: "Марат", jid: wa.jid, consent: true }, wa);
+    expect(await balance(identity.data.guestId)).toBe(0);
+    const created = await regulars("", {
+      body: { name: "Марат Б.", phone: "+77015550002", bonus: 500 },
+    });
+    expect(created.status).toBe(201);
+    expect(await balance(identity.data.guestId)).toBe(50000);
+    const guests = (
+      await pool.query("SELECT count(*)::int AS n FROM hostess_guests WHERE phone='+77015550002'")
+    ).rows[0].n;
+    expect(guests).toBe(1);
+  });
+
+  test("broadcast skips opted-out and inactive regulars, personalises text and closes when done", async () => {
+    for (const [name, phone] of [
+      ["Анвар Серик", "+77015550011"],
+      ["Дана", "+77015550012"],
+      ["Отказник", "+77015550013"],
+      ["Выключен", "+77015550014"],
+    ])
+      await regulars("", { body: { name, phone, bonus: 0 } });
+    const all = (await regulars("")).data.regulars;
+    const byName = (n: string) => all.find((r: { name: string }) => r.name === n).id;
+    await regulars(`/${byName("Отказник")}`, { method: "PATCH", body: { optedOut: true } });
+    await regulars(`/${byName("Выключен")}`, { method: "PATCH", body: { active: false } });
+
+    const picked = [byName("Анвар Серик"), byName("Дана"), byName("Отказник"), byName("Выключен")];
+    const campaign = await regulars("/broadcasts", {
+      body: { title: "Матч", body: "{имя}, в субботу Эль-Класико, приходите", regularIds: picked },
+    });
+    expect(campaign.status).toBe(201);
+    expect(campaign.data.recipients).toBe(2);
+    const recipients = (await regulars(`/broadcasts/${campaign.data.id}`)).data.recipients;
+    expect(recipients.map((r: { message: string }) => r.message).sort()).toEqual([
+      "Анвар, в субботу Эль-Класико, приходите",
+      "Дана, в субботу Эль-Класико, приходите",
+    ]);
+    expect((await regulars("/broadcasts")).data.broadcasts[0]).toMatchObject({
+      total: 2,
+      pending: 2,
+    });
+
+    for (const r of recipients)
+      expect(
+        (
+          await regulars(`/broadcasts/${campaign.data.id}/recipients/${r.id}`, {
+            method: "PATCH",
+            body: { status: "sent" },
+          })
+        ).status,
+      ).toBe(200);
+    const done = (await regulars("/broadcasts")).data.broadcasts[0];
+    expect(done).toMatchObject({ status: "done", sent: 2, pending: 0 });
+    expect(
+      (await regulars(`/broadcasts/${campaign.data.id}/cancel`, { method: "POST", body: {} }))
+        .status,
+    ).toBe(409);
+
+    const second = await regulars("/broadcasts", { body: { title: "Ещё", body: "Привет" } });
+    const eligible = (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM venue_regulars WHERE active AND NOT opted_out",
+      )
+    ).rows[0].n;
+    expect(second.data.recipients).toBe(eligible);
+    expect(
+      (await regulars(`/broadcasts/${second.data.id}/cancel`, { method: "POST", body: {} })).status,
+    ).toBe(200);
+    const cancelled = (await regulars(`/broadcasts/${second.data.id}`)).data.recipients;
+    expect(cancelled.every((r: { status: string }) => r.status === "skipped")).toBe(true);
   });
 });
