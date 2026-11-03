@@ -148,6 +148,9 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
           <Link to="/tables/qr" className={`${controlClass} inline-flex items-center`}>
             Столы и QR
           </Link>
+          <Link to="/tables/iiko" className={`${controlClass} inline-flex items-center`}>
+            Рассадка iiko
+          </Link>
           <button
             type="button"
             onClick={() => {
@@ -449,6 +452,7 @@ export function HallScreen({ openReservations = false }: { openReservations?: bo
                 ) : filters.view === "map" ? (
                   <FloorPlan
                     zoneName={zone.name}
+                    zoneCode={zone.code}
                     resources={resources}
                     selectedId={selectedId}
                     onSelect={(id) => select(id)}

@@ -1,7 +1,40 @@
 import type { FloorResource } from "../../lib/floor-operations";
 import type { MapPosition } from "../../lib/hall/operations";
 
-export function RoomFurniture({ gaming, title }: { gaming: boolean; title: string }) {
+function Plant({ x, y }: { x: number; y: number }) {
+  return (
+    <g transform={`translate(${x} ${y})`}>
+      <circle r="26" fill="#d6c7ac" />
+      <ellipse cx="-9" cy="-5" rx="14" ry="23" transform="rotate(-40)" fill="#7b9779" />
+      <ellipse cx="9" cy="-5" rx="13" ry="22" transform="rotate(40)" fill="#98ab87" />
+      <ellipse cy="6" rx="11" ry="20" fill="#688b70" />
+    </g>
+  );
+}
+
+function Banner({ x, label }: { x: number; label: string }) {
+  return (
+    <>
+      <rect
+        x={x}
+        y="57"
+        width="240"
+        height="54"
+        rx="18"
+        fill="#d9c5a4"
+        stroke="#bca47e"
+        strokeWidth="2"
+      />
+      <text x={x + 120} y="90" textAnchor="middle" fill="#796449" fontSize="17" letterSpacing="3">
+        {label}
+      </text>
+    </>
+  );
+}
+
+// Zone dressing follows the iiko hall schema the table positions come from (migration 0018).
+export function RoomFurniture({ zoneCode, title }: { zoneCode?: string; title: string }) {
+  const entrance = zoneCode === "first_hall" ? 760 : 390;
   return (
     <g aria-hidden="true" pointerEvents="none">
       <rect
@@ -16,51 +49,107 @@ export function RoomFurniture({ gaming, title }: { gaming: boolean; title: strin
       />
       <path d="M40 208H960M40 386H960M40 564H960" stroke="#e9e1d3" strokeWidth="2" />
       <path d="M180 34V660M440 34V660M700 34V660" stroke="#ede5d8" strokeWidth="2" />
-      <rect
-        x="95"
-        y="57"
-        width="240"
-        height="54"
-        rx="18"
-        fill="#d9c5a4"
-        stroke="#bca47e"
-        strokeWidth="2"
-      />
-      <text x="215" y="90" textAnchor="middle" fill="#796449" fontSize="17" letterSpacing="3">
-        {gaming ? "PLAYSTATION" : "БАР · XOXO"}
-      </text>
-      <text x="570" y="89" textAnchor="middle" fill="#998a76" fontSize="16" letterSpacing="2">
+      <text x="820" y="76" textAnchor="middle" fill="#998a76" fontSize="16" letterSpacing="2">
         {title.toUpperCase()}
       </text>
-      <rect
-        x="830"
-        y="155"
-        width="60"
-        height="350"
-        rx="22"
-        fill="#c7cbb9"
-        stroke="#a8b197"
+      {zoneCode === "first_hall" && (
+        <>
+          <rect
+            x="760"
+            y="110"
+            width="130"
+            height="420"
+            rx="24"
+            fill="#d9c5a4"
+            stroke="#bca47e"
+            strokeWidth="2"
+          />
+          <path d="M790 140V500" stroke="#c9b28c" strokeWidth="3" />
+          {[160, 230, 300, 370, 440].map((y) => (
+            <circle
+              key={y}
+              cx="740"
+              cy={y}
+              r="11"
+              fill="#cbbda7"
+              stroke="#b4a58e"
+              strokeWidth="2"
+            />
+          ))}
+          <text
+            x="840"
+            y="330"
+            textAnchor="middle"
+            fill="#796449"
+            fontSize="17"
+            letterSpacing="3"
+            transform="rotate(90 840 330)"
+          >
+            БАРНАЯ СТОЙКА
+          </text>
+          <Plant x={70} y={262} />
+        </>
+      )}
+      {zoneCode === "second_hall" && (
+        <>
+          <rect
+            x="830"
+            y="155"
+            width="60"
+            height="350"
+            rx="22"
+            fill="#c7cbb9"
+            stroke="#a8b197"
+            strokeWidth="2"
+          />
+          <path d="M842 176V484M833 268H884M833 382H884" stroke="#b2bba3" strokeWidth="3" />
+          <text x="860" y="550" textAnchor="middle" fill="#889177" fontSize="13">
+            ЛАУНЖ
+          </text>
+          <Plant x={82} y={590} />
+          <Plant x={912} y={603} />
+        </>
+      )}
+      {zoneCode === "ps" && (
+        <>
+          <Banner x={420} label="ИГРОВАЯ ЗОНА" />
+          <Plant x={912} y={603} />
+          <Plant x={82} y={340} />
+        </>
+      )}
+      {zoneCode === "vip" && (
+        <>
+          {/* Three separate rooms, one table each. */}
+          <path
+            d="M40 245H330M670 245H960M40 445H330M670 445H960"
+            stroke="#d9d0c0"
+            strokeWidth="8"
+          />
+          {[
+            { y: 140, label: "VIP 01" },
+            { y: 345, label: "VIP 02" },
+            { y: 555, label: "VIP 03" },
+          ].map(({ y, label }) => (
+            <text key={label} x="95" y={y} fill="#998a76" fontSize="15" letterSpacing="3">
+              {label}
+            </text>
+          ))}
+        </>
+      )}
+      {!["first_hall", "second_hall", "ps", "vip"].includes(zoneCode ?? "") && (
+        <>
+          <Banner x={95} label="БАР · XOXO" />
+          <Plant x={912} y={603} />
+        </>
+      )}
+      <path d={`M${entrance} 665H${entrance + 100}`} stroke="#f3eee5" strokeWidth="15" />
+      <path
+        d={`M${entrance + 4} 665V614Q${entrance + 50} 614 ${entrance + 50} 663`}
+        fill="none"
+        stroke="#b3a48d"
         strokeWidth="2"
       />
-      <path d="M842 176V484M833 268H884M833 382H884" stroke="#b2bba3" strokeWidth="3" />
-      <text x="860" y="550" textAnchor="middle" fill="#889177" fontSize="13">
-        ЛАУНЖ
-      </text>
-      {[
-        { x: 82, y: 590 },
-        { x: 910, y: 90 },
-        { x: 912, y: 603 },
-      ].map(({ x, y }) => (
-        <g key={x + y} transform={`translate(${x} ${y})`}>
-          <circle r="26" fill="#d6c7ac" />
-          <ellipse cx="-9" cy="-5" rx="14" ry="23" transform="rotate(-40)" fill="#7b9779" />
-          <ellipse cx="9" cy="-5" rx="13" ry="22" transform="rotate(40)" fill="#98ab87" />
-          <ellipse cy="6" rx="11" ry="20" fill="#688b70" />
-        </g>
-      ))}
-      <path d="M390 665H490" stroke="#f3eee5" strokeWidth="15" />
-      <path d="M394 665V614Q440 614 440 663" fill="none" stroke="#b3a48d" strokeWidth="2" />
-      <text x="535" y="643" fill="#9e927e" fontSize="13" letterSpacing="2">
+      <text x={entrance + 145} y="643" fill="#9e927e" fontSize="13" letterSpacing="2">
         ВХОД
       </text>
     </g>

@@ -621,8 +621,10 @@ export async function handleDiningApi(request: Request): Promise<Response | null
             name: "urls.json",
             data: Buffer.from(
               JSON.stringify(
-                tables.map(({ code, url, resourceId, enabled }) => ({
+                tables.map(({ code, name, zoneName, url, resourceId, enabled }) => ({
                   code,
+                  name,
+                  zoneName,
                   url,
                   resourceId,
                   enabled,

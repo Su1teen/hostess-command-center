@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { openStaffOrder } from "../orders/ServiceOperations";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays, Clock3, ExternalLink, Users } from "lucide-react";
-import { staffApi, controlClass } from "../../lib/dine-in-client";
+import { staffApi, controlClass, money } from "../../lib/dine-in-client";
 import type {
   FloorEvent,
   FloorReservation,
@@ -74,6 +74,7 @@ function VisitSummary({ session, onOpen }: { session: FloorSession; onOpen: () =
       )}
       <p className="mt-2 text-xs">
         Заказов: {session.orderCount} · активных: {session.activeOrderCount}
+        {session.orderCount > 0 && <strong> · к оплате {money(session.payableMinor)}</strong>}
       </p>
       <button
         type="button"
@@ -122,7 +123,10 @@ export function FloorTableDrawer({
   const [selectedReservation, setReservation] = useState<string | null>(
     event?.reservationId ?? null,
   );
-  const [folioId, setFolio] = useState<string | null>(event?.sessionId ?? null);
+  // A table with orders opens straight on its folio: staff come here to see what was ordered.
+  const [folioId, setFolio] = useState<string | null>(
+    event?.sessionId ?? (event || !current?.orderCount ? null : current.id),
+  );
   const [seating, setSeating] = useState(false),
     [guests, setGuests] = useState(current?.guests ?? resource.currentReservation?.guests ?? 2);
   const [release, setRelease] = useState<FloorSession | null>(null),

@@ -11,9 +11,36 @@ import {
 import { boundedView, PLAN_WIDTH as WIDTH, PLAN_HEIGHT as HEIGHT } from "../../lib/hall/viewport";
 import { RoomFurniture, TableFurniture } from "./FloorFurniture";
 type Point = { x: number; y: number };
+
+/** Orders punched to the table: active count and the running bill, pinned to the table corner. */
+function OrderBadge({ resource, width }: { resource: FloorResource; width: number }) {
+  const session = resource.currentSession ?? resource.projectedSession;
+  if (!session?.orderCount) return null;
+  const active = session.activeOrderCount > 0;
+  const total = Number(session.payableMinor) / 100;
+  const label = `${session.orderCount} · ${new Intl.NumberFormat("ru-RU").format(Math.round(total))} ₸`;
+  const badgeWidth = (active ? 26 : 16) + label.length * 8;
+  return (
+    <g transform={`translate(${width - badgeWidth + 14} -18)`} aria-hidden="true">
+      <rect
+        width={badgeWidth}
+        height={28}
+        rx={14}
+        fill={active ? "#7c3aed" : "#334155"}
+        stroke="#fff"
+        strokeWidth={2.5}
+      />
+      {active && <circle cx={14} cy={14} r={4.5} fill="#fde68a" />}
+      <text x={active ? 24 : 12} y={19} fill="#fff" fontSize={14} fontWeight={700}>
+        {label}
+      </text>
+    </g>
+  );
+}
 export function FloorPlan({
   resources,
   zoneName = "Зал",
+  zoneCode,
   selectedId,
   onSelect,
   editing = false,
@@ -22,6 +49,7 @@ export function FloorPlan({
 }: {
   resources: FloorResource[];
   zoneName?: string;
+  zoneCode?: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
   editing?: boolean;
@@ -29,7 +57,7 @@ export function FloorPlan({
   onPosition?: (id: string, position: MapPosition) => void;
 }) {
   const patternId = useId().replace(/:/g, "");
-  const gaming = /пс|ps|playstation|общий/i.test(zoneName);
+  const gaming = zoneCode === "ps" || /пс|ps|playstation/i.test(zoneName);
   const host = useRef<HTMLDivElement>(null),
     svg = useRef<SVGSVGElement>(null);
   const [view, setView] = useState(() => boundedView(1, { x: 0, y: 0 }));
@@ -225,7 +253,7 @@ export function FloorPlan({
           <g
             transform={`translate(${WIDTH / 2 + pan.x},${HEIGHT / 2 + pan.y}) scale(${zoom}) translate(${-WIDTH / 2},${-HEIGHT / 2})`}
           >
-            <RoomFurniture gaming={gaming} title={zoneName} />
+            <RoomFurniture zoneCode={zoneCode} title={zoneName} />
             {resources.map((resource, index) => {
               const p = positions?.[resource.id] ?? resourcePosition(resource, index),
                 style = FLOOR_STATE_STYLE[resource.state];
@@ -328,7 +356,7 @@ export function FloorPlan({
                       fontWeight={600}
                       aria-hidden="true"
                     >
-                      <tspan fill="#172033">{resource.code}</tspan>
+                      <tspan fill="#172033">{resource.name.replace(/^Стол\s+/i, "")}</tspan>
                     </text>
                   ) : (
                     <>
@@ -360,6 +388,7 @@ export function FloorPlan({
                       </text>
                     </>
                   )}
+                  <OrderBadge resource={resource} width={p.width} />
                 </g>
               );
             })}

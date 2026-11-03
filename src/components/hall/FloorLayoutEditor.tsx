@@ -111,6 +111,7 @@ export function FloorLayoutEditor({
       </div>
       <FloorPlan
         zoneName={zone.name}
+        zoneCode={zone.code}
         resources={zone.resources}
         selectedId={selected}
         onSelect={setSelected}

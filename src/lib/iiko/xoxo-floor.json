@@ -1,0 +1,571 @@
+{
+  "source": "iiko Cloud API /api/1/reserve/available_restaurant_sections",
+  "organization": "P.S. XOXO",
+  "exportedAt": "2026-11-03T14:13:45.037Z",
+  "sections": [
+    {
+      "id": "12effecc-c0d3-4b32-b834-b94c09c6accb",
+      "name": "PS (Общий зал)",
+      "width": 810,
+      "height": 550,
+      "tables": [
+        {
+          "id": "debfb4fb-fcf0-4b07-b79e-f13cd530e3ae",
+          "number": 1,
+          "name": "",
+          "seatingCapacity": 0,
+          "x": 20,
+          "y": 190,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "68614821-7322-44f4-a56a-05c85e1951a5",
+          "number": 2,
+          "name": "",
+          "seatingCapacity": 0,
+          "x": 20,
+          "y": 370,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "cb75faf5-7338-442f-9c00-20097c30f6ad",
+          "number": 3,
+          "name": "",
+          "seatingCapacity": 0,
+          "x": 170,
+          "y": 370,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "3ea68789-6625-49b4-852b-8549ee74c050",
+          "number": 4,
+          "name": "",
+          "seatingCapacity": 0,
+          "x": 170,
+          "y": 190,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "e8ebe232-a4a5-4cc7-9243-cba7a7311222",
+          "number": 5,
+          "name": "",
+          "seatingCapacity": 0,
+          "x": 300,
+          "y": 290,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        }
+      ],
+      "labels": [
+        {
+          "text": "1200",
+          "x": 220,
+          "y": 380,
+          "width": 60,
+          "height": 26
+        },
+        {
+          "text": "1200",
+          "x": 350,
+          "y": 300,
+          "width": 60,
+          "height": 26
+        },
+        {
+          "text": "1200",
+          "x": 220,
+          "y": 200,
+          "width": 60,
+          "height": 26
+        },
+        {
+          "text": "1200",
+          "x": 70,
+          "y": 380,
+          "width": 60,
+          "height": 26
+        },
+        {
+          "text": "1200",
+          "x": 70,
+          "y": 200,
+          "width": 60,
+          "height": 26
+        }
+      ],
+      "unplacedTables": []
+    },
+    {
+      "id": "fc620f0d-9787-4bc0-bb65-2c26f3506a4e",
+      "name": "ВИП",
+      "width": 810,
+      "height": 550,
+      "tables": [
+        {
+          "id": "b10256a4-8b9b-4d41-a8f1-78a3a427578a",
+          "number": 1,
+          "name": "Стол 1",
+          "seatingCapacity": 0,
+          "x": 10,
+          "y": 20,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "efbd9a7f-610d-4e90-9324-40e0c116d241",
+          "number": 2,
+          "name": "Стол 2",
+          "seatingCapacity": 0,
+          "x": 10,
+          "y": 100,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "f989e8a0-5577-4fb4-b537-c5a147a90c98",
+          "number": 3,
+          "name": "Стол 3",
+          "seatingCapacity": 0,
+          "x": 10,
+          "y": 190,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "df2ff5fa-efd3-47cf-b8f8-70082e9d10ea",
+          "number": 4,
+          "name": "Стол 4",
+          "seatingCapacity": 0,
+          "x": 10,
+          "y": 280,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "eac48d93-5a45-4484-9407-71de8ba43f8f",
+          "number": 5,
+          "name": "Стол 5",
+          "seatingCapacity": 0,
+          "x": 10,
+          "y": 370,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        }
+      ],
+      "labels": [
+        {
+          "text": "Вип 2",
+          "x": 10,
+          "y": 110,
+          "width": 69,
+          "height": 26
+        },
+        {
+          "text": "Вип 1",
+          "x": 10,
+          "y": 30,
+          "width": 69,
+          "height": 26
+        },
+        {
+          "text": "3000/ч",
+          "x": 60,
+          "y": 100,
+          "width": 78,
+          "height": 26
+        },
+        {
+          "text": "Вип 5",
+          "x": 10,
+          "y": 380,
+          "width": 69,
+          "height": 26
+        },
+        {
+          "text": "Вип 3",
+          "x": 10,
+          "y": 190,
+          "width": 69,
+          "height": 26
+        },
+        {
+          "text": "2500",
+          "x": 60,
+          "y": 30,
+          "width": 60,
+          "height": 26
+        },
+        {
+          "text": "Вип 4",
+          "x": 10,
+          "y": 280,
+          "width": 69,
+          "height": 26
+        },
+        {
+          "text": "2500/ч",
+          "x": 60,
+          "y": 190,
+          "width": 78,
+          "height": 26
+        }
+      ],
+      "unplacedTables": []
+    },
+    {
+      "id": "76b0df38-5ea8-477d-aecc-a632b5ac24a0",
+      "name": "Зал (Барная)",
+      "width": 810,
+      "height": 550,
+      "tables": [
+        {
+          "id": "5eb45bb3-88ee-4dc2-97d9-c35e63580180",
+          "number": 1,
+          "name": "Стол 1",
+          "seatingCapacity": 0,
+          "x": 50,
+          "y": 420,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "3991ef2a-282f-47ec-ac45-d8fc71e0f3b3",
+          "number": 2,
+          "name": "Стол 2",
+          "seatingCapacity": 0,
+          "x": 190,
+          "y": 60,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "ed802263-b570-41fa-a1da-a5aa8322933d",
+          "number": 3,
+          "name": "Стол 3",
+          "seatingCapacity": 0,
+          "x": 340,
+          "y": 60,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "6d9fd7f7-c3eb-4760-a206-40cdd7dce493",
+          "number": 4,
+          "name": "Стол 4",
+          "seatingCapacity": 0,
+          "x": 50,
+          "y": 600,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "a018bff5-c4a6-4e55-8970-2d2ffed032ae",
+          "number": 5,
+          "name": "Стол 5",
+          "seatingCapacity": 0,
+          "x": 220,
+          "y": 600,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "bcdcf312-90c6-4fe1-bd78-bcf233f13051",
+          "number": 6,
+          "name": "Стол 6",
+          "seatingCapacity": 0,
+          "x": 350,
+          "y": 600,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "e7acd2f7-7a46-4770-b7bf-8bcc27d1065c",
+          "number": 7,
+          "name": "Стол 7",
+          "seatingCapacity": 0,
+          "x": 340,
+          "y": 240,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "46e603a9-5ed9-4c5e-8d47-6b8e3fba8293",
+          "number": 8,
+          "name": "Стол 8",
+          "seatingCapacity": 0,
+          "x": 60,
+          "y": 60,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        }
+      ],
+      "labels": [
+        {
+          "text": "Барная стойка",
+          "x": 504,
+          "y": 79,
+          "width": 160,
+          "height": 26
+        },
+        {
+          "text": "0",
+          "x": 90,
+          "y": 90,
+          "width": 24,
+          "height": 26
+        },
+        {
+          "text": "БАР",
+          "x": 542,
+          "y": 234,
+          "width": 56,
+          "height": 26
+        }
+      ],
+      "unplacedTables": [
+        {
+          "id": "3f8fd120-2d15-4d86-b642-cda7208269d8",
+          "number": 9,
+          "name": "Стол 9"
+        },
+        {
+          "id": "18a40345-081b-4bb6-8bce-931f78db30de",
+          "number": 20,
+          "name": "Стол 10"
+        },
+        {
+          "id": "bfa67ecc-a6da-4c58-a172-763ee93f5cbb",
+          "number": 21,
+          "name": "Стол 11"
+        },
+        {
+          "id": "1b66f4a7-c957-41f7-bb4c-cd07bddf52ff",
+          "number": 22,
+          "name": "Стол 12"
+        },
+        {
+          "id": "43ef0d28-867c-420c-9ed9-b6ceae1287b7",
+          "number": 23,
+          "name": "Стол 13"
+        },
+        {
+          "id": "39c16638-09ab-4228-8dc9-dd4b88abb3b6",
+          "number": 24,
+          "name": "Стол 14"
+        },
+        {
+          "id": "85f19ce3-a626-40c9-9cec-3a6d566991f5",
+          "number": 25,
+          "name": "Стол 15"
+        },
+        {
+          "id": "eaece6cd-2182-4b4a-9c59-732bb6599237",
+          "number": 26,
+          "name": "Стол 16"
+        },
+        {
+          "id": "1a00a3e2-6124-467e-8a68-df79fabdd50b",
+          "number": 27,
+          "name": "Стол 17"
+        },
+        {
+          "id": "2133d714-62b1-4689-8b3c-e18fa4023bb8",
+          "number": 28,
+          "name": "Стол 18"
+        },
+        {
+          "id": "fcf6a264-9d7a-4570-a03b-5fb90146218b",
+          "number": 29,
+          "name": "Стол 19"
+        },
+        {
+          "id": "16117afe-7704-4b9f-8fce-e609fc0f3dfd",
+          "number": 30,
+          "name": "Стол 20"
+        }
+      ]
+    },
+    {
+      "id": "5f7e1c67-1972-4ce9-9e29-9f75add7a550",
+      "name": "НА ВЫНОС",
+      "width": 810,
+      "height": 550,
+      "tables": [
+        {
+          "id": "085a4ff9-73f4-49ef-b780-9e881499b33b",
+          "number": 1,
+          "name": "",
+          "seatingCapacity": 0,
+          "x": 40,
+          "y": 150,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        }
+      ],
+      "labels": [
+        {
+          "text": "На вынос",
+          "x": 10,
+          "y": 130,
+          "width": 109,
+          "height": 26
+        }
+      ],
+      "unplacedTables": []
+    },
+    {
+      "id": "4108177f-c945-48ab-ae2b-f7b74c33d1df",
+      "name": "Общий зал",
+      "width": 810,
+      "height": 550,
+      "tables": [
+        {
+          "id": "a36e820d-1820-4958-9421-16a0b1782d54",
+          "number": 1,
+          "name": "",
+          "seatingCapacity": 0,
+          "x": 10,
+          "y": 130,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "00ebf21f-83bb-475d-9a4a-4e5066174c9b",
+          "number": 2,
+          "name": "",
+          "seatingCapacity": 0,
+          "x": 110,
+          "y": 200,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        },
+        {
+          "id": "7b2febfc-85ed-418b-8ac1-dfeeedf71d8e",
+          "number": 3,
+          "name": "",
+          "seatingCapacity": 0,
+          "x": 110,
+          "y": 70,
+          "width": 80,
+          "height": 80,
+          "angle": 0
+        }
+      ],
+      "labels": [
+        {
+          "text": "Стол",
+          "x": 110,
+          "y": 210,
+          "width": 63,
+          "height": 26
+        },
+        {
+          "text": "Стол",
+          "x": 10,
+          "y": 140,
+          "width": 63,
+          "height": 26
+        },
+        {
+          "text": "Стол",
+          "x": 110,
+          "y": 80,
+          "width": 63,
+          "height": 26
+        }
+      ],
+      "unplacedTables": [
+        {
+          "id": "62f56022-1582-4469-9bba-a8fd2b267f90",
+          "number": 4,
+          "name": ""
+        },
+        {
+          "id": "855c2f19-1f07-4e95-95af-755bbfe28a13",
+          "number": 5,
+          "name": ""
+        },
+        {
+          "id": "10e3ab04-d06b-4f6f-ab94-88291617b891",
+          "number": 6,
+          "name": ""
+        },
+        {
+          "id": "88825937-8a9d-476d-b625-18918ff912b4",
+          "number": 7,
+          "name": ""
+        },
+        {
+          "id": "706d29f3-73fc-4782-905b-7f5d58de08c6",
+          "number": 8,
+          "name": ""
+        },
+        {
+          "id": "5d90b5b4-2c7b-4e36-a406-92043cf8b6c4",
+          "number": 9,
+          "name": ""
+        },
+        {
+          "id": "7086ec75-71a3-4534-baee-54d3bd7887f8",
+          "number": 10,
+          "name": ""
+        },
+        {
+          "id": "1908b191-0b3a-4d69-8b4c-4983be0a0702",
+          "number": 11,
+          "name": ""
+        },
+        {
+          "id": "fcd1c4f9-fda7-4642-94e4-2beb3419de9f",
+          "number": 12,
+          "name": ""
+        },
+        {
+          "id": "4578875c-ea8b-4d09-896d-ddc3d50df6ee",
+          "number": 13,
+          "name": ""
+        },
+        {
+          "id": "3b09feea-f692-4c2a-acb5-931ad7a725bb",
+          "number": 14,
+          "name": ""
+        },
+        {
+          "id": "44703552-dd9b-4615-a859-3e2063d3ed20",
+          "number": 15,
+          "name": ""
+        },
+        {
+          "id": "4b0154f3-ec81-4ad1-be8d-d325e14ecd99",
+          "number": 16,
+          "name": ""
+        }
+      ]
+    }
+  ]
+}

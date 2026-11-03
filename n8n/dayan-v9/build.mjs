@@ -413,7 +413,8 @@ return [{ json: { text, sendGroup: !cfg.testMode, telegramText: cfg.testMode ? '
 
 // ========================= Main: WhatsApp inbound =========================
 function mainWorkflow(bookingId, handoffId, invoiceId) {
-  const prompt = readFileSync(new URL("./prompt.md", dir), "utf8");
+  // Windows checkouts may hold prompt.md with CRLF; the agent prompt is always LF.
+  const prompt = readFileSync(new URL("./prompt.md", dir), "utf8").replace(/\r\n/g, "\n");
   const c = {};
   const toolInputs = (fields) => ({
     mappingMode: "defineBelow",
@@ -506,7 +507,7 @@ if (Number(r.statusCode) !== 200 || typeof b.accepted !== 'boolean')
 if (!b.accepted) return [];
 if (b.paused) return [{ json: { route: 'paused', chatId: g.chatId, text: g.text, phone: g.phone, reason: b.pausedReason, name: b.guest?.whatsappName } }];
 const k = b.knowledge || {};
-const zones = (k.zones || []).map(z => z.name).join(', ') || 'Первый зал, Второй зал, ПС / общий зал, VIP-комнаты';
+const zones = (k.zones || []).map(z => z.summary || z.name).join('; ') || 'Основной зал: 8 столов; Второй зал: 3 стола; PlayStation: 3 места с PlayStation; VIP-комнаты: 3 отдельные комнаты';
 const PROMPT = ${JSON.stringify(prompt)};
 const lines = [];
 lines.push('# Данные на этот момент');

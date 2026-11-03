@@ -13,7 +13,11 @@ import {
 } from "../../lib/dine-in-client";
 
 const zoneLabel = (name: string) =>
-  name === "ПС / общий зал" ? "ПС" : name === "VIP-комнаты" ? "VIP" : name;
+  name === "ПС / общий зал" || name === "PlayStation"
+    ? "PS"
+    : name === "VIP-комнаты"
+      ? "VIP"
+      : name;
 const bookingLabel = (table: QrTable) =>
   table.bookingState === "pending"
     ? "Бронирование не настроено"

@@ -104,9 +104,9 @@ export async function listRegistry(venueId: string, db: Db = pool) {
 }
 export function registryDistribution(tables: { zoneCode: string }[]) {
   const expected = [
-    { code: "first_hall", name: "Первый зал", count: 8 },
+    { code: "first_hall", name: "Основной зал", count: 8 },
     { code: "second_hall", name: "Второй зал", count: 3 },
-    { code: "ps", name: "ПС", count: 3 },
+    { code: "ps", name: "PlayStation", count: 3 },
     { code: "vip", name: "VIP", count: 3 },
   ];
   return {

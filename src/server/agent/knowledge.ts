@@ -177,9 +177,13 @@ export async function agentKnowledge(days = 14, db: Queryable = pool) {
   const [events, promotions, zones] = await Promise.all([
     listEvents(today, until, db),
     listPromotions(db),
+    // Only zones with bookable places, so the agent never offers a zone it cannot seat.
     db.query(
-      `SELECT code,name FROM venue_zones WHERE venue_code='xoxo' AND is_active AND code<>'qr_unassigned'
-       ORDER BY display_order`,
+      `SELECT z.code,z.name,z.zone_type AS "zoneType",
+         json_agg(json_build_object('name',r.name,'capacity',r.capacity) ORDER BY r.code) AS places
+       FROM venue_zones z JOIN venue_resources r ON r.zone_id=z.id AND r.is_reservable AND r.status='active'
+       WHERE z.venue_code='xoxo' AND z.is_active AND z.code<>'qr_unassigned'
+       GROUP BY z.id ORDER BY z.display_order`,
     ),
   ]);
   return {
@@ -207,6 +211,43 @@ export async function agentKnowledge(days = 14, db: Queryable = pool) {
         schedule: promotionSchedule(p),
         appliesToday: promotionApplies(p, today),
       })),
-    zones: zones.rows,
+    zones: zones.rows.map(zoneSummary),
   };
+}
+
+type ZoneRow = {
+  code: string;
+  name: string;
+  zoneType: string;
+  places: { name: string; capacity: number | null }[];
+};
+/** «VIP-комнаты: 3 отдельные комнаты — VIP 01 до 6, VIP 02 до 9, VIP 03 до 4 гостей». */
+export function zoneSummary(zone: ZoneRow) {
+  const count = zone.places.length;
+  const noun =
+    zone.zoneType === "vip"
+      ? plural(count, "отдельная комната", "отдельные комнаты", "отдельных комнат")
+      : zone.code === "ps"
+        ? plural(count, "место с PlayStation", "места с PlayStation", "мест с PlayStation")
+        : plural(count, "стол", "стола", "столов");
+  const capacities = new Set(zone.places.map((p) => p.capacity));
+  const detail =
+    capacities.size === 1
+      ? [...capacities][0]
+        ? `, до ${[...capacities][0]} гостей за каждым`
+        : ""
+      : ` — ${zone.places.map((p) => (p.capacity ? `${p.name} до ${p.capacity}` : p.name)).join(", ")} гостей`;
+  return {
+    code: zone.code,
+    name: zone.name,
+    places: count,
+    summary: `${zone.name}: ${count} ${noun}${detail}`,
+  };
+}
+function plural(n: number, one: string, few: string, many: string) {
+  const mod10 = n % 10,
+    mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }

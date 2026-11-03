@@ -23,6 +23,7 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as AgentRouteImport } from './routes/agent'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TablesQrRouteImport } from './routes/tables.qr'
+import { Route as TablesIikoRouteImport } from './routes/tables.iiko'
 
 const SuppliersRoute = SuppliersRouteImport.update({
   id: '/suppliers',
@@ -94,6 +95,11 @@ const TablesQrRoute = TablesQrRouteImport.update({
   path: '/tables/qr',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TablesIikoRoute = TablesIikoRouteImport.update({
+  id: '/tables/iiko',
+  path: '/tables/iiko',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -109,6 +115,7 @@ export interface FileRoutesByFullPath {
   '/sales': typeof SalesRoute
   '/shift': typeof ShiftRoute
   '/suppliers': typeof SuppliersRoute
+  '/tables/iiko': typeof TablesIikoRoute
   '/tables/qr': typeof TablesQrRoute
 }
 export interface FileRoutesByTo {
@@ -125,6 +132,7 @@ export interface FileRoutesByTo {
   '/sales': typeof SalesRoute
   '/shift': typeof ShiftRoute
   '/suppliers': typeof SuppliersRoute
+  '/tables/iiko': typeof TablesIikoRoute
   '/tables/qr': typeof TablesQrRoute
 }
 export interface FileRoutesById {
@@ -142,6 +150,7 @@ export interface FileRoutesById {
   '/sales': typeof SalesRoute
   '/shift': typeof ShiftRoute
   '/suppliers': typeof SuppliersRoute
+  '/tables/iiko': typeof TablesIikoRoute
   '/tables/qr': typeof TablesQrRoute
 }
 export interface FileRouteTypes {
@@ -160,6 +169,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/shift'
     | '/suppliers'
+    | '/tables/iiko'
     | '/tables/qr'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -176,6 +186,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/shift'
     | '/suppliers'
+    | '/tables/iiko'
     | '/tables/qr'
   id:
     | '__root__'
@@ -192,6 +203,7 @@ export interface FileRouteTypes {
     | '/sales'
     | '/shift'
     | '/suppliers'
+    | '/tables/iiko'
     | '/tables/qr'
   fileRoutesById: FileRoutesById
 }
@@ -209,6 +221,7 @@ export interface RootRouteChildren {
   SalesRoute: typeof SalesRoute
   ShiftRoute: typeof ShiftRoute
   SuppliersRoute: typeof SuppliersRoute
+  TablesIikoRoute: typeof TablesIikoRoute
   TablesQrRoute: typeof TablesQrRoute
 }
 
@@ -312,6 +325,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TablesQrRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/tables/iiko': {
+      id: '/tables/iiko'
+      path: '/tables/iiko'
+      fullPath: '/tables/iiko'
+      preLoaderRoute: typeof TablesIikoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -329,6 +349,7 @@ const rootRouteChildren: RootRouteChildren = {
   SalesRoute: SalesRoute,
   ShiftRoute: ShiftRoute,
   SuppliersRoute: SuppliersRoute,
+  TablesIikoRoute: TablesIikoRoute,
   TablesQrRoute: TablesQrRoute,
 }
 export const routeTree = rootRouteImport
