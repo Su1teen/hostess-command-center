@@ -9,6 +9,7 @@ import {
   statusLabels,
   controlClass,
   type DineOrder,
+  placeName,
 } from "../../lib/dine-in-client";
 const nextStatus = {
   new: "accepted",
@@ -79,11 +80,9 @@ export function OrderDrawer({ orderId, onClose }: { orderId: string | null; onCl
             <div className="flex justify-between gap-3">
               <div>
                 <h2 className="text-2xl font-semibold">
-                  №{order.number} · Стол {order.tableCode}
+                  №{order.number} · {placeName(order)}
                 </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {order.zoneName} · {order.tableName}
-                </p>
+                <p className="mt-1 text-sm text-slate-500">{order.zoneName}</p>
               </div>
               <button
                 aria-label="Закрыть карточку"

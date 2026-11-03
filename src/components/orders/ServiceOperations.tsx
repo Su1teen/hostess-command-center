@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { staffApi, type DineOrder, controlClass } from "../../lib/dine-in-client";
+import { staffApi, type DineOrder, controlClass, placeName } from "../../lib/dine-in-client";
 import { StaffOrderComposer } from "./StaffOrderComposer";
 import { OrderDrawer } from "./OrderDrawer";
 
@@ -157,7 +157,7 @@ export function ServiceOperations({ children }: { children: ReactNode }) {
               setNotice(null);
             }}
           >
-            Новый заказ №{notice.number} · Стол {notice.tableCode}
+            Новый заказ №{notice.number} · {placeName(notice)}
             <span className="block text-xs">
               {notice.zoneName} ·{" "}
               {new Date(notice.acceptedAt).toLocaleTimeString("ru-RU", {

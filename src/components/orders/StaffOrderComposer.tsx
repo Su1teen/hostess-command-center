@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { staffApi, money, controlClass, type DineOrder } from "../../lib/dine-in-client";
+import {
+  staffApi,
+  money,
+  controlClass,
+  placeWithZone,
+  type DineOrder,
+} from "../../lib/dine-in-client";
 import { openOrder } from "./ServiceOperations";
 import { FloorFolio } from "../hall/FloorFolio";
 import type { FloorSnapshot } from "../../lib/floor-operations";
@@ -105,7 +111,7 @@ export function StaffOrderComposer({
         .filter((r) => r.state !== "blocked")
         .map((r) => ({
           id: r.currentSession?.seatedAt ? r.currentSession.id : `seat:${r.id}`,
-          label: `Стол ${r.code} · ${z.name}${r.currentSession?.seatedAt ? " · гости на месте" : " · подтвердить посадку"}`,
+          label: `${r.name} · ${z.name}${r.currentSession?.seatedAt ? " · гости на месте" : " · подтвердить посадку"}`,
         })),
     ) ?? [];
   const products =
@@ -322,7 +328,7 @@ export function StaffOrderComposer({
           >
             <h2 className="text-xl font-semibold">Заказ №{created.number} создан</h2>
             <p className="text-sm">
-              Стол {created.tableCode} · {money(created.payableMinor)}
+              {placeWithZone(created)} · {money(created.payableMinor)}
             </p>
             <button className={`${controlClass} w-full`} onClick={() => openOrder(created.id)}>
               Принять в работу / отметить оплату

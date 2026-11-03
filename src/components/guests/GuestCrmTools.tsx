@@ -7,6 +7,7 @@ import {
   dateTime,
   controlClass,
   statusLabels,
+  placeWithZone,
 } from "../../lib/dine-in-client";
 type Guest = { id: string; name: string; phone: string | null; provisional: boolean };
 type Summary = {
@@ -25,7 +26,14 @@ type Summary = {
     acceptedAt: string;
     payableMinor: string;
   }[];
-  visits: { id: string; tableCode: string; openedAt: string; closedAt: string | null }[];
+  visits: {
+    id: string;
+    tableCode: string;
+    tableName: string;
+    zoneName: string;
+    openedAt: string;
+    closedAt: string | null;
+  }[];
   audit: { actor: string; action: string; createdAt: string }[];
 };
 export function GuestCrmTools({
@@ -165,7 +173,7 @@ export function GuestCrmTools({
               <h3 className="mt-5 text-sm font-semibold">Посещения по заказам</h3>
               {summary.data.visits.map((v) => (
                 <p key={v.id} className="mt-2 text-xs">
-                  Стол {v.tableCode} · {dateTime(v.openedAt)} ·{" "}
+                  {placeWithZone(v)} · {dateTime(v.openedAt)} ·{" "}
                   {v.closedAt ? "закрыто" : "обслуживание"}
                 </p>
               ))}

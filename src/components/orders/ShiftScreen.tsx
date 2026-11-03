@@ -8,6 +8,7 @@ import {
   money,
   statusLabels,
   controlClass,
+  placeWithZone,
 } from "../../lib/dine-in-client";
 import type { FloorSnapshot } from "../../lib/floor-operations";
 import { formatTimeAlmaty } from "../../lib/formatters/time";
@@ -121,7 +122,7 @@ export function ShiftScreen() {
           <h2 className="font-semibold">Скоро прибытие</h2>
           {upcoming.map(({ r, z }) => (
             <a key={r.id} href="/?reservations=true" className="mt-2 block min-h-11 text-sm">
-              Стол {r.code} · {z.name} · {formatTimeAlmaty(r.nextReservation!.startsAt)} ·{" "}
+              {r.name} · {z.name} · {formatTimeAlmaty(r.nextReservation!.startsAt)} ·{" "}
               {r.nextReservation!.guests} гостей{" "}
               {r.currentSession ? "· текущий визит ещё открыт" : ""}
             </a>
@@ -147,9 +148,7 @@ export function ShiftScreen() {
               className={`rounded-2xl border bg-white p-4 ${o.status === "new" ? "border-amber-300" : "border-slate-200"}`}
             >
               <button onClick={() => openOrder(o.id)} className="block w-full text-left">
-                <h2 className="text-lg font-semibold">
-                  Стол {o.tableCode} · {o.zoneName}
-                </h2>
+                <h2 className="text-lg font-semibold">{placeWithZone(o)}</h2>
                 <p
                   className={`mt-1 text-sm ${o.status === "new" && age >= 10 ? "font-semibold text-red-700" : "text-slate-500"}`}
                 >

@@ -164,8 +164,9 @@ export async function guestDiningSummary(id: string, slug = "xoxo") {
       ).rows,
       visits: (
         await client.query(
-          `SELECT DISTINCT s.id,s.opened_at AS "openedAt",s.closed_at AS "closedAt",r.code AS "tableCode" FROM dining_sessions s
-        JOIN dine_in_orders o ON o.dining_session_id=s.id JOIN venue_resources r ON r.id=s.resource_id WHERE o.guest_id=$1 AND s.venue_id=$2 ORDER BY s.opened_at DESC LIMIT 100`,
+          `SELECT DISTINCT s.id,s.opened_at AS "openedAt",s.closed_at AS "closedAt",r.code AS "tableCode",r.name AS "tableName",z.name AS "zoneName" FROM dining_sessions s
+        JOIN dine_in_orders o ON o.dining_session_id=s.id JOIN venue_resources r ON r.id=s.resource_id
+        JOIN venue_zones z ON z.id=r.zone_id WHERE o.guest_id=$1 AND s.venue_id=$2 ORDER BY s.opened_at DESC LIMIT 100`,
           [id, v.id],
         )
       ).rows,

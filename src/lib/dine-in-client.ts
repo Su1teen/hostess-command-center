@@ -34,6 +34,14 @@ export const dateTime = (date: string) =>
     dateStyle: "short",
     timeStyle: "short",
   }).format(new Date(date));
+/** Staff see the name printed on the plate («VIP 01», «Стол 02»), never the internal code. */
+export const placeName = (o: { tableName?: string | null; tableCode: string }) =>
+  o.tableName || `Стол ${o.tableCode}`;
+export const placeWithZone = (o: {
+  tableName?: string | null;
+  tableCode: string;
+  zoneName?: string | null;
+}) => (o.zoneName ? `${placeName(o)} · ${o.zoneName}` : placeName(o));
 export const statusLabels = {
   new: "Новый",
   accepted: "Принят",

@@ -11,6 +11,8 @@ import {
   statusLabels,
   controlClass,
   type DineOrder,
+  placeName,
+  placeWithZone,
 } from "../../lib/dine-in-client";
 export function OrdersScreen() {
   const role = useStaffRole(),
@@ -114,7 +116,7 @@ export function OrdersScreen() {
           {groups.map(([name, rows]) => (
             <section key={name}>
               <h2 className="mb-2 text-sm font-semibold text-slate-500">
-                {group ? `Стол ${name}` : name} · {rows.length}
+                {group ? placeWithZone(rows[0]) : name} · {rows.length}
               </h2>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {rows.map((o) => (
@@ -129,7 +131,7 @@ export function OrdersScreen() {
                   >
                     <div className="flex justify-between gap-3">
                       <strong>
-                        №{o.number} · Стол {o.tableCode}
+                        №{o.number} · {group ? placeName(o) : placeWithZone(o)}
                       </strong>
                       <span
                         className={`rounded-full px-2 py-1 text-xs ${o.status === "new" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100"}`}
