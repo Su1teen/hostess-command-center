@@ -10,6 +10,7 @@ import {
   type Snapshot,
 } from "../src/server/dine-in/domain";
 import { qrPng, qrSvg, zipFiles, crc32, tableUrl, printPanels } from "../src/server/dine-in/qr";
+import { guestWifi, wifiInput, wifiQrPayload } from "../src/server/dine-in/wifi";
 import { hostessPublicOrigin, validateBookingWindow } from "../src/server/guest/security";
 
 describe("booking audit regressions", () => {
@@ -196,5 +197,39 @@ describe("real QR exports", () => {
       if (previous === undefined) delete process.env.HOSTESS_PUBLIC_ORIGIN;
       else process.env.HOSTESS_PUBLIC_ORIGIN = previous;
     }
+  });
+});
+
+describe("guest Wi-Fi", () => {
+  const xoxo = {
+    ssid: "A. B.  Demo guest",
+    password: "Guest-pass-77",
+    security: "WPA" as const,
+    hidden: false,
+  };
+  test("QR payload keeps the exact network name, spaces included", () => {
+    // Same format as the QR a phone shares from its Wi-Fi settings.
+    expect(wifiQrPayload(xoxo)).toBe("WIFI:T:WPA;S:A. B.  Demo guest;P:Guest-pass-77;;");
+  });
+  test("special characters are escaped and open or hidden networks are encoded", () => {
+    expect(wifiQrPayload({ ...xoxo, ssid: String.raw`a;b,c:d"e\f`, password: "p;w:12345" })).toBe(
+      String.raw`WIFI:T:WPA;S:a\;b\,c\:d\"e\\f;P:p\;w\:12345;;`,
+    );
+    expect(wifiQrPayload({ ...xoxo, security: "nopass", password: "", hidden: true })).toBe(
+      "WIFI:T:nopass;S:A. B.  Demo guest;H:true;;",
+    );
+  });
+  test("input validation follows the security type and never trims the name", () => {
+    const base = { ...xoxo, enabled: true, version: null };
+    expect(wifiInput.parse(base).ssid).toBe("A. B.  Demo guest");
+    expect(wifiInput.safeParse({ ...base, password: "short" }).success).toBe(false);
+    expect(wifiInput.safeParse({ ...base, security: "nopass" }).success).toBe(false);
+    expect(wifiInput.safeParse({ ...base, ssid: "x".repeat(33) }).success).toBe(false);
+  });
+  test("guests only see an enabled network without editing metadata", () => {
+    const stored = { ...xoxo, enabled: true, version: 3, updatedAt: "", updatedBy: "staff:a" };
+    expect(guestWifi(stored)).toEqual({ ...xoxo, qr: wifiQrPayload(xoxo) });
+    expect(guestWifi({ ...stored, enabled: false })).toBeNull();
+    expect(guestWifi(null)).toBeNull();
   });
 });

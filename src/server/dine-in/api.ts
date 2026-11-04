@@ -29,6 +29,7 @@ import { ledger, loyaltyLock, walletView } from "./loyalty";
 import { printPanels, qrPng, qrSvg, zipFiles } from "./qr";
 import { menuCatalog, saveMenuItem, occupancySignals, batchMenuItems } from "./menu";
 import { importMenu } from "./menu-import";
+import { getWifi, guestWifi, saveWifi } from "./wifi";
 import {
   listRegistry,
   bookingTargets,
@@ -229,6 +230,10 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         const v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
         return json(await menuCatalog(v.id, v.slug));
       }
+      if (path === "/dine-in/wifi" && method === "GET") {
+        const v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
+        return json({ wifi: guestWifi(await getWifi(v.id)) });
+      }
       if (path === "/dine-in/tables" && method === "GET") {
         const v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
         const tables = (
@@ -365,11 +370,27 @@ export async function handleDiningApi(request: Request): Promise<Response | null
           path === "/tables/qr/bootstrap" ||
           path === "/tables/qr/bulk" ||
           path === "/dine-in/outbox/retry" ||
+          (write && path === "/dine-in/wifi") ||
           (method === "PATCH" && path.startsWith("/tables/"));
       const staff = await staffAuth(request, write, isSensitive),
         v = await venue(pool, url.searchParams.get("venue") ?? "xoxo");
       if (path === "/dine-in/booking-requests" && method === "GET")
         return json({ requests: await bookingRequests(v.id) });
+      if (path === "/dine-in/wifi" && method === "GET") return json({ wifi: await getWifi(v.id) });
+      if (path === "/dine-in/wifi" && method === "PUT") {
+        const input = await body(request);
+        const wifi = await transaction(async (client) => {
+          const saved = await saveWifi(client, v.id, `staff:${staff.staff_id}`, input);
+          // The password is never written to the audit log.
+          await audit(client, staff, "wifi_updated", v.id, {
+            ssid: saved.ssid,
+            security: saved.security,
+            enabled: saved.enabled,
+          });
+          return saved;
+        });
+        return json({ wifi });
+      }
       const requestMatch = /^\/dine-in\/booking-requests\/([a-f0-9-]{36})$/.exec(path);
       if (requestMatch && method === "PATCH") {
         if (staff.role !== "manager")

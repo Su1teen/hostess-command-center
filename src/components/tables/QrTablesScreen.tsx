@@ -11,6 +11,7 @@ import {
   type QrTable,
   type QrRegistry,
 } from "../../lib/dine-in-client";
+import { WifiSettings } from "./WifiSettings";
 
 const zoneLabel = (name: string) =>
   name === "ПС / общий зал" || name === "PlayStation"
@@ -244,6 +245,7 @@ export function QrTablesScreen() {
           К заказам <ArrowUpRight size={15} />
         </Link>
       </div>
+      <WifiSettings />
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white p-4 sm:p-5">
         <div className="flex flex-wrap gap-x-7 gap-y-3">
           <div>
