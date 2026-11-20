@@ -104,12 +104,6 @@ export function StaffGate({ children }: { children: ReactNode }) {
       </button>
     </form>
   );
-  if (checking)
-    return (
-      <p className="p-6" role="status">
-        Проверяем доступ сотрудника…
-      </p>
-    );
   if (staff)
     return (
       <>
@@ -197,6 +191,11 @@ export function StaffGate({ children }: { children: ReactNode }) {
     <div className="mx-auto max-w-sm px-5 py-16">
       <p className="text-xs uppercase tracking-widest text-slate-500">Hostess Command Center</p>
       <h1 className="mt-4 text-3xl font-semibold">Вход сотрудника</h1>
+      {checking && (
+        <p role="status" className="mt-2 text-xs text-slate-500">
+          Проверяем сохранённую сессию…
+        </p>
+      )}
       {loginForm}
     </div>
   );
