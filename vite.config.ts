@@ -13,6 +13,7 @@ const nitroConfig: NitroConfig = {
 };
 
 export default defineConfig({
+  vite: { build: { target: ["es2017", "chrome61", "safari11"] } },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this

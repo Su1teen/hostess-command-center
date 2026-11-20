@@ -16,18 +16,25 @@ export function StaffGate({ children }: { children: ReactNode }) {
     const expire = () => setExpired(true);
     window.addEventListener("hostess:session-expired", expire);
     let active = true;
-    void fetch("/api/staff/v1/me", { cache: "no-store" })
+    // Old/slow tablets: never wait forever — after 8s fall through to the login form.
+    const controller = typeof AbortController === "undefined" ? null : new AbortController();
+    const timer = window.setTimeout(() => controller?.abort(), 8000);
+    const done = () => {
+      window.clearTimeout(timer);
+      if (active) setChecking(false);
+    };
+    fetch("/api/staff/v1/me", { cache: "no-store", signal: controller?.signal })
       .then(async (r) => {
         if (r.ok && active) setStaff((await r.json()).staff);
       })
-      .catch(() => {
+      .then(done, () => {
         if (active) setError("Сервис входа недоступен");
-      })
-      .finally(() => {
-        if (active) setChecking(false);
+        done();
       });
     return () => {
       active = false;
+      window.clearTimeout(timer);
+      controller?.abort();
       window.removeEventListener("hostess:session-expired", expire);
     };
   }, []);
