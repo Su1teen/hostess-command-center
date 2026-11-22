@@ -507,6 +507,27 @@ try {
   );
   assert(await live.locator("#sound").isVisible(), "Sound toggle must appear when JS runs");
   pass("ES3 live refresh shows a new guest order without reloading");
+  await live.locator("#alarm:not(.hide)").waitFor({ timeout: 15000 });
+  assert(
+    (await live.locator("#alarm-text").innerText()).includes("№" + fresh.number),
+    "Alarm banner must name the new order",
+  );
+  const bellOk = await live.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const bell = document.getElementById("bell");
+        if (bell.readyState >= 1) return resolve(bell.duration > 1.5);
+        bell.onloadedmetadata = () => resolve(bell.duration > 1.5);
+        bell.onerror = () => resolve(false);
+        bell.load();
+      }),
+  );
+  assert(bellOk, "Bell WAV must load in the browser");
+  await live.locator("#alarm-ok").click();
+  await live.locator("#alarm.hide").waitFor({ state: "attached" });
+  await live.waitForTimeout(6000);
+  assert(await live.locator("#alarm.hide").count(), "Acknowledged order must not ring again");
+  pass("loud alarm shows the new order on every page, bell loads, «Принято» silences it");
   await submit(live, live.locator(`form[action="/lite/order/${fresh.id}/status"] button`));
   await live.getByText("Статус: Принят").waitFor();
   assert(!errors.length, "Page errors: " + errors.join("; "));

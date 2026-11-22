@@ -113,9 +113,10 @@ ${input.live ? '<noscript><meta http-equiv="refresh" content="20"></noscript>' :
 </head>
 <body>
 ${header}
+${staff ? '<div id="alarm" class="alarm hide" role="alert"><button id="alarm-ok" type="button" class="btn">Принято</button><a href="/lite/shift?f=new"><b>НОВЫЙ ЗАКАЗ</b> <span id="alarm-text"></span><span id="alarm-tap" class="tap hide">Нажмите сюда, чтобы включился звук</span></a></div>' : ""}
 <div class="wrap">${input.body}</div>
 <div class="foot">Облегчённая версия для планшетов · <a href="/?full=1">Полная версия</a></div>
-${staff ? '<audio id="beep" src="/lite/beep.wav" preload="auto"></audio>' : ""}
+${staff ? '<audio id="bell" src="/lite/bell.wav" preload="auto"></audio><audio id="beep" src="/lite/beep.wav" preload="auto"></audio>' : ""}
 <script>${LITE_JS}</script>
 </body>
 </html>`;

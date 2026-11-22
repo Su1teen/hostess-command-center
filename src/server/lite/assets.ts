@@ -115,11 +115,19 @@ textarea.field{min-height:80px}
 .login .card{padding:22px}
 .foot{padding:20px 12px 40px;text-align:center;font-size:13px;color:#9ca3af}
 .foot a{color:#6b7280}
+.alarm{position:fixed;top:0;left:0;right:0;z-index:1000;padding:12px 14px;background:#dc2626;color:#ffffff;font-size:22px;line-height:1.25;border-bottom:4px solid #7f1d1d}
+.alarm.flash{background:#facc15;color:#111827;border-bottom-color:#a16207}
+.alarm a{color:inherit;text-decoration:none;display:block;padding-right:130px}
+.alarm .btn{float:right;margin:0 0 0 10px;font-size:20px;padding:12px 18px;background:#ffffff;color:#111827;border-color:#ffffff}
+.alarm .tap{display:block;font-size:15px;margin-top:4px;text-decoration:underline}
 .hide{display:none}
 @media (max-width:760px){.col,.col3{float:none;width:auto}.tbl{width:46%}.who .id{display:none}}
 `;
 
-/** ECMAScript 3 progressive enhancement: live refresh, sound, double-submit guard. */
+/**
+ * ECMAScript 3 progressive enhancement: loud new-order alarm on every staff page,
+ * live refresh, double-submit guard.
+ */
 export const LITE_JS = `(function () {
   var doc = document;
   function bindForms(root) {
@@ -146,49 +154,222 @@ export const LITE_JS = `(function () {
   }
   bindForms(doc);
 
-  var live = doc.getElementById("live");
-  if (!live) return;
-  var source = live.getAttribute("data-src");
-  var seen = live.getAttribute("data-new") || "";
-  var failures = 0;
-  var busy = false;
-  var soundOn = false;
-  var audio = doc.getElementById("beep");
+  var memory = {};
+  function getItem(key) {
+    try { if (window.localStorage) return window.localStorage.getItem(key); } catch (e) {}
+    return memory.hasOwnProperty(key) ? memory[key] : null;
+  }
+  function setItem(key, value) {
+    memory[key] = value;
+    try { if (window.localStorage) window.localStorage.setItem(key, value); } catch (e) {}
+  }
+  function listen(node, name, fn) {
+    if (node.addEventListener) node.addEventListener(name, fn, false);
+    else if (node.attachEvent) node.attachEvent("on" + name, fn);
+  }
+  function later(fn, ms) { return window.setTimeout(fn, ms); }
+
+  /* ---------- sound ---------- */
+  var bell = doc.getElementById("bell");
+  var beepEl = doc.getElementById("beep");
   var button = doc.getElementById("sound");
-  try {
-    soundOn = !!window.localStorage && window.localStorage.getItem("hostess-lite-sound") === "1";
-  } catch (e) {}
+  var soundOn = getItem("hostess-lite-sound") !== "0";
+  var unlocked = false;
+  var blockedNow = false;
   function label() {
     if (button) button.innerHTML = soundOn ? "\\u0417\\u0432\\u0443\\u043a: \\u0432\\u043a\\u043b" : "\\u0417\\u0432\\u0443\\u043a: \\u0432\\u044b\\u043a\\u043b";
   }
-  function beep() {
-    if (!audio || !audio.play) return;
-    try { audio.currentTime = 0; } catch (e) {}
-    try { audio.play(); } catch (e) {}
+  function setBlocked(value) {
+    blockedNow = value;
+    var tap = doc.getElementById("alarm-tap");
+    if (tap) tap.className = value ? "tap" : "tap hide";
+  }
+  function play(el) {
+    if (!soundOn || !el || !el.play) return;
+    try { el.muted = false; } catch (e) {}
+    try { el.volume = 1; } catch (e) {}
+    try { el.currentTime = 0; } catch (e) {}
+    try {
+      var result = el.play();
+      if (result && result.then) {
+        result.then(function () { unlocked = true; setBlocked(false); }, function () { setBlocked(true); });
+      } else {
+        unlocked = true;
+      }
+    } catch (e) { setBlocked(true); }
+  }
+  /* Old Android only lets a page play audio after a tap: prime both players on the first tap. */
+  function unlock() {
+    if (unlocked) return;
+    unlocked = true;
+    var players = [bell, beepEl];
+    for (var i = 0; i < players.length; i++) {
+      var el = players[i];
+      if (!el || !el.play) continue;
+      try {
+        el.muted = true;
+        var result = el.play();
+        if (result && result.then) result.then(null, function () {});
+      } catch (e) {}
+    }
+    later(function () {
+      if (ringing) return;
+      for (var j = 0; j < players.length; j++) {
+        var p = players[j];
+        if (!p || !p.pause) continue;
+        try { p.pause(); p.currentTime = 0; p.muted = false; } catch (e) {}
+      }
+    }, 80);
   }
   if (button) {
     button.className = button.className.replace(" hide", "");
     label();
     button.onclick = function () {
       soundOn = !soundOn;
-      try { window.localStorage.setItem("hostess-lite-sound", soundOn ? "1" : "0"); } catch (e) {}
-      if (soundOn) beep();
+      setItem("hostess-lite-sound", soundOn ? "1" : "0");
+      if (soundOn) play(bell);
       label();
       return false;
     };
   }
+
+  /* ---------- new-order alarm ---------- */
+  var alarm = doc.getElementById("alarm");
+  var alarmText = doc.getElementById("alarm-text");
+  var alarmOk = doc.getElementById("alarm-ok");
+  var baseTitle = doc.title;
+  var pending = [];
+  var shown = ",";
+  var active = false;
+  var ringing = false;
+  var repeatTimer = null;
+  var blinkTimer = null;
+  var flash = false;
+  var alertFailures = 0;
+  function acknowledged() { return "," + (getItem("hostess-lite-acked") || "") + ","; }
+  function ringSeries() {
+    var count = 0;
+    ringing = true;
+    function strike() {
+      if (!active) { ringing = false; return; }
+      play(bell);
+      count++;
+      if (count < 3) later(strike, 1800);
+      else later(function () { ringing = false; }, 1800);
+    }
+    strike();
+    try { if (window.navigator.vibrate) window.navigator.vibrate([400, 200, 400, 200, 400]); } catch (e) {}
+  }
+  function blink() {
+    flash = !flash;
+    alarm.className = flash ? "alarm flash" : "alarm";
+    doc.title = flash ? "*** \\u041d\\u041e\\u0412\\u042b\\u0419 \\u0417\\u0410\\u041a\\u0410\\u0417 ***" : baseTitle;
+  }
+  function start() {
+    active = true;
+    alarm.className = "alarm";
+    blinkTimer = window.setInterval(blink, 600);
+    ringSeries();
+    repeatTimer = window.setInterval(function () { if (active && !ringing) ringSeries(); }, 15000);
+  }
+  function stop() {
+    active = false;
+    if (blinkTimer) window.clearInterval(blinkTimer);
+    if (repeatTimer) window.clearInterval(repeatTimer);
+    blinkTimer = repeatTimer = null;
+    alarm.className = "alarm hide";
+    doc.title = baseTitle;
+    shown = ",";
+  }
+  function update(list) {
+    pending = list;
+    var known = acknowledged();
+    var fresh = [];
+    for (var i = 0; i < list.length; i++) {
+      if (known.indexOf("," + list[i].id + ",") < 0) fresh.push(list[i]);
+    }
+    if (!fresh.length) { if (active) stop(); return; }
+    var labels = [];
+    var added = false;
+    var next = ",";
+    for (var k = 0; k < fresh.length; k++) {
+      labels.push(fresh[k].label);
+      next += fresh[k].id + ",";
+      if (shown.indexOf("," + fresh[k].id + ",") < 0) added = true;
+    }
+    shown = next;
+    alarmText.innerHTML = "";
+    alarmText.appendChild(doc.createTextNode(labels.join(" \\u00b7 ")));
+    if (!active) start();
+    else if (added && !ringing) ringSeries();
+  }
+  function parse(text) {
+    var out = [];
+    var lines = String(text || "").split("\\n");
+    for (var i = 0; i < lines.length; i++) {
+      var tab = lines[i].indexOf("\\t");
+      if (tab > 0) out.push({ id: lines[i].substring(0, tab), label: lines[i].substring(tab + 1) });
+    }
+    return out;
+  }
+  function poll() {
+    var request;
+    try { request = new XMLHttpRequest(); } catch (e) { return; }
+    request.open("GET", "/lite/alerts?_=" + new Date().getTime(), true);
+    request.onreadystatechange = function () {
+      if (request.readyState !== 4) return;
+      if (request.status === 200) {
+        alertFailures = 0;
+        update(parse(request.responseText));
+      } else if (request.status === 401) {
+        window.location.href = "/lite/login";
+        return;
+      } else {
+        alertFailures++;
+      }
+      later(poll, alertFailures > 3 ? 20000 : 5000);
+    };
+    try { request.send(null); } catch (e) { alertFailures++; later(poll, 20000); }
+  }
+  if (alarm && alarmText) {
+    if (alarmOk) {
+      alarmOk.onclick = function () {
+        var ids = [];
+        for (var i = 0; i < pending.length; i++) ids.push(pending[i].id);
+        setItem("hostess-lite-acked", ids.join(","));
+        stop();
+        return false;
+      };
+    }
+    var onTap = function () {
+      if (active && blockedNow && !ringing) ringSeries();
+      else unlock();
+    };
+    listen(doc, "touchstart", onTap);
+    listen(doc, "click", onTap);
+    poll();
+  }
+
+  /* ---------- live region refresh ---------- */
+  var live = doc.getElementById("live");
+  if (!live) return;
+  var source = live.getAttribute("data-src");
+  var seen = live.getAttribute("data-new") || "";
+  var failures = 0;
+  var busy = false;
   function typing() {
     var active = doc.activeElement;
     if (!active || !active.tagName) return false;
     var tag = active.tagName.toLowerCase();
     return tag === "input" || tag === "textarea" || tag === "select";
   }
-  function hasFresh(previous, next) {
+  /* Orders ring through the alarm above; the live region only chimes for WhatsApp hand-offs. */
+  function freshChat(previous, next) {
     if (!next) return false;
     var known = "," + previous + ",";
     var ids = next.split(",");
     for (var i = 0; i < ids.length; i++) {
-      if (ids[i] && known.indexOf("," + ids[i] + ",") < 0) return true;
+      if (ids[i].indexOf("wa:") === 0 && known.indexOf("," + ids[i] + ",") < 0) return true;
     }
     return false;
   }
@@ -199,7 +380,7 @@ export const LITE_JS = `(function () {
     node.innerHTML = ok ? "\\u041d\\u0430 \\u0441\\u0432\\u044f\\u0437\\u0438" : "\\u041d\\u0435\\u0442 \\u0441\\u0432\\u044f\\u0437\\u0438 \\u2014 \\u043f\\u043e\\u0432\\u0442\\u043e\\u0440\\u044f\\u0435\\u043c";
   }
   function schedule() {
-    window.setTimeout(tick, failures > 3 ? 20000 : 6000);
+    later(tick, failures > 3 ? 20000 : 6000);
   }
   function tick() {
     if (busy || typing()) { schedule(); return; }
@@ -212,7 +393,7 @@ export const LITE_JS = `(function () {
       busy = false;
       if (request.status === 200) {
         var fresh = request.getResponseHeader("X-Lite-New") || "";
-        if (soundOn && hasFresh(seen, fresh)) beep();
+        if (freshChat(seen, fresh)) play(beepEl);
         seen = fresh;
         if (!typing()) {
           live.innerHTML = request.responseText;
@@ -235,20 +416,16 @@ export const LITE_JS = `(function () {
 })();
 `;
 
-let cachedBeep: Uint8Array<ArrayBuffer> | null = null;
-
-/** 0.25 s, 880 Hz, 8-bit mono PCM WAV — the one audio format every old Android plays. */
-export function beepWav(): Uint8Array<ArrayBuffer> {
-  if (cachedBeep) return cachedBeep;
-  const rate = 8000,
-    samples = rate / 4,
-    buffer = new Uint8Array(44 + samples),
+/** 8-bit mono PCM WAV from samples in [-1, 1] — the one audio format every old Android plays. */
+function wav(rate: number, samples: ArrayLike<number>): Uint8Array<ArrayBuffer> {
+  const n = samples.length,
+    buffer = new Uint8Array(44 + n),
     view = new DataView(buffer.buffer);
   const text = (offset: number, value: string) => {
     for (let i = 0; i < value.length; i++) buffer[offset + i] = value.charCodeAt(i);
   };
   text(0, "RIFF");
-  view.setUint32(4, 36 + samples, true);
+  view.setUint32(4, 36 + n, true);
   text(8, "WAVE");
   text(12, "fmt ");
   view.setUint32(16, 16, true);
@@ -259,11 +436,69 @@ export function beepWav(): Uint8Array<ArrayBuffer> {
   view.setUint16(32, 1, true);
   view.setUint16(34, 8, true);
   text(36, "data");
-  view.setUint32(40, samples, true);
-  for (let i = 0; i < samples; i++) {
-    const fade = Math.min(1, (samples - i) / 400, i / 80);
-    buffer[44 + i] = Math.round(128 + 90 * fade * Math.sin((2 * Math.PI * 880 * i) / rate));
-  }
-  cachedBeep = buffer;
+  view.setUint32(40, n, true);
+  for (let i = 0; i < n; i++)
+    buffer[44 + i] = Math.max(0, Math.min(255, Math.round(128 + 127 * samples[i])));
   return buffer;
+}
+
+let cachedBeep: Uint8Array<ArrayBuffer> | null = null;
+let cachedBell: Uint8Array<ArrayBuffer> | null = null;
+
+/** Soft 0.25 s, 880 Hz chime — WhatsApp hand-offs. */
+export function beepWav(): Uint8Array<ArrayBuffer> {
+  if (cachedBeep) return cachedBeep;
+  const rate = 8000,
+    samples = new Float64Array(rate / 4);
+  for (let i = 0; i < samples.length; i++) {
+    const fade = Math.min(1, (samples.length - i) / 400, i / 80);
+    samples[i] = (90 / 127) * fade * Math.sin((2 * Math.PI * 880 * i) / rate);
+  }
+  return (cachedBeep = wav(rate, samples));
+}
+
+/**
+ * Loud «дзынь-дзынь» service bell for new orders: two strikes of an inharmonic bell
+ * around 1.2–6 kHz (where small tablet speakers are loudest), normalised to full
+ * scale and soft-clipped so it cuts through a noisy hall. 1.6 s, 22 050 Hz.
+ */
+export function bellWav(): Uint8Array<ArrayBuffer> {
+  if (cachedBell) return cachedBell;
+  const rate = 22050,
+    samples = new Float64Array(Math.round(rate * 1.6)),
+    base = 1175;
+  // [frequency ratio, amplitude, decay per second] — classic bell partials.
+  const partials = [
+    [1, 1, 2.6],
+    [2, 0.6, 4],
+    [2.76, 0.5, 5.5],
+    [4.07, 0.3, 7],
+    [5.4, 0.22, 9],
+  ];
+  const strikes = [
+    [0, 1],
+    [0.3, 0.85],
+  ];
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const t = i / rate;
+    let value = 0;
+    for (const [at, gain] of strikes) {
+      const dt = t - at;
+      if (dt < 0) continue;
+      const attack = Math.min(1, dt / 0.002);
+      for (const [ratio, amp, decay] of partials)
+        value +=
+          gain * attack * amp * Math.exp(-dt * decay) * Math.sin(2 * Math.PI * base * ratio * dt);
+    }
+    samples[i] = value;
+    peak = Math.max(peak, Math.abs(value));
+  }
+  const drive = 2.4,
+    norm = Math.tanh(drive);
+  for (let i = 0; i < samples.length; i++) {
+    const tail = Math.min(1, (samples.length - i) / (rate * 0.05));
+    samples[i] = (Math.tanh((drive * samples[i]) / peak) / norm) * tail;
+  }
+  return (cachedBell = wav(rate, samples));
 }

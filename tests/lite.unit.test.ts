@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parse } from "acorn";
-import { LITE_CSS, LITE_JS, beepWav } from "../src/server/lite/assets";
+import { LITE_CSS, LITE_JS, beepWav, bellWav } from "../src/server/lite/assets";
 import { createLiteHandler, type Dispatch } from "../src/server/lite/handler";
 import { esc, money } from "../src/server/lite/html";
 import { LEGACY_REDIRECT } from "../src/lib/legacy-redirect";
@@ -121,6 +121,24 @@ describe("lite: old-browser compatibility gates", () => {
     expect(String.fromCharCode(...wav.slice(8, 12))).toBe("WAVE");
     expect(wav.length).toBe(44 + 2000);
   });
+  test("new-order bell is a loud 8-bit WAV that old Android can play", () => {
+    const wav = bellWav();
+    expect(String.fromCharCode(...wav.slice(0, 4))).toBe("RIFF");
+    const view = new DataView(wav.buffer);
+    expect(view.getUint32(24, true)).toBe(22050);
+    expect(view.getUint16(34, true)).toBe(8);
+    const data = wav.slice(44);
+    expect(data.length / 22050).toBeGreaterThan(1.5);
+    let min = 255,
+      max = 0;
+    for (const v of data) {
+      min = Math.min(min, v);
+      max = Math.max(max, v);
+    }
+    // Full scale: the peak reaches the 8-bit rails.
+    expect(min).toBeLessThanOrEqual(2);
+    expect(max).toBeGreaterThanOrEqual(253);
+  });
   test("money avoids the ₸ glyph and groups thousands", () => {
     expect(money("245050")).toBe("2 450,50 тг");
     expect(money(100000)).toBe("1 000 тг");
@@ -188,6 +206,55 @@ describe("lite: pages", () => {
     const html = await (await handle(get("/lite/shift")))!.text();
     expect(html).not.toContain("Принять заказ");
     expect(html).not.toContain("+ Заказ");
+  });
+});
+
+describe("lite: loud new-order alarm", () => {
+  const routes = () => ({
+    "GET /me": me,
+    "GET /dine-in/operations": (): [number, unknown] => [
+      200,
+      {
+        orders: [
+          order(),
+          order({ id: "22222222-2222-4222-8222-222222222222", number: "43", status: "accepted" }),
+          order({
+            id: "33333333-3333-4333-8333-333333333333",
+            number: "44",
+            tableName: "Бар\nстойка",
+          }),
+        ],
+        newCount: 2,
+        workingCount: 1,
+        unpaidCount: 3,
+        hasMore: false,
+      },
+    ],
+  });
+  test("every staff page carries the alarm banner and the bell", async () => {
+    const { handle } = fakeApi({ ...routes(), "GET /floor": () => [200, { zones: [] }] });
+    const html = await (await handle(get("/lite/hall")))!.text();
+    expect(html).toContain('id="alarm"');
+    expect(html).toContain('id="alarm-ok"');
+    expect(html).toContain('<audio id="bell" src="/lite/bell.wav"');
+    const bell = (await handle(get("/lite/bell.wav")))!;
+    expect(bell.headers.get("content-type")).toBe("audio/wav");
+    const login = await (await handle(get("/lite/login", "")))!.text();
+    expect(login).not.toContain('id="alarm"');
+  });
+  test("alerts list only new orders as id<TAB>label lines", async () => {
+    const { handle } = fakeApi(routes());
+    const res = (await handle(get("/lite/alerts")))!;
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    expect((await res.text()).split("\n")).toEqual([
+      "11111111-1111-4111-8111-111111111111\tСтол 07 · №42",
+      "33333333-3333-4333-8333-333333333333\tБар стойка · №44",
+    ]);
+  });
+  test("alerts without a session answer 401 so the tablet goes to login", async () => {
+    const { handle } = fakeApi({ "GET /me": () => [401, { error: { code: "UNAUTHENTICATED" } }] });
+    expect((await handle(get("/lite/alerts", "")))!.status).toBe(401);
   });
 });
 

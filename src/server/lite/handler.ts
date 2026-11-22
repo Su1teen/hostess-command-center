@@ -14,7 +14,7 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { DineOrder } from "../../lib/dine-in-client";
 import type { FloorResource, FloorSnapshot, FloorZone } from "../../lib/floor-operations";
-import { beepWav } from "./assets";
+import { beepWav, bellWav } from "./assets";
 import {
   csrfField,
   dateKey,
@@ -881,6 +881,20 @@ function quoteView(ctx: Ctx, quote: Quote, session: string, key: string, warning
   )}<a class="btn block" href="/lite/new?session=${esc(session)}">Изменить состав</a></div>`;
 }
 
+/**
+ * New (not yet accepted) orders for the loud alarm on every staff page:
+ * one `id<TAB>label` line per order, plain text so ES3 needs no JSON parser.
+ */
+async function alerts(ctx: Ctx) {
+  const ops = await api<Operations>(ctx, "GET", "/dine-in/operations");
+  if (!ops.ok) return respond(ctx, "", ops.status === 401 ? 401 : 503);
+  const body = ops.data.orders
+    .filter((o) => o.status === "new")
+    .map((o) => `${o.id}\t${placeName(o)} · №${o.number}`.replace(/[\r\n]+/g, " "))
+    .join("\n");
+  return respond(ctx, body, 200, { "content-type": "text/plain; charset=utf-8" });
+}
+
 /* ---------------- router ---------------- */
 
 export function createLiteHandler(dispatch: Dispatch) {
@@ -888,8 +902,8 @@ export function createLiteHandler(dispatch: Dispatch) {
     const url = new URL(request.url);
     if (url.pathname !== "/lite" && !url.pathname.startsWith("/lite/")) return null;
     const path = url.pathname.replace(/\/+$/, "") || "/lite";
-    if (path === "/lite/beep.wav")
-      return new Response(beepWav(), {
+    if (path === "/lite/beep.wav" || path === "/lite/bell.wav")
+      return new Response(path === "/lite/bell.wav" ? bellWav() : beepWav(), {
         headers: { "content-type": "audio/wav", "cache-control": "public, max-age=86400" },
       });
     const cookies = parseCookies(request.headers.get("cookie"));
@@ -940,10 +954,11 @@ async function handleGet(ctx: Ctx, path: string): Promise<Response> {
   }
   const staff = await me(ctx);
   if (!staff) {
-    if (partial) return respond(ctx, "", 401);
+    if (partial || path === "/lite/alerts") return respond(ctx, "", 401);
     return redirect(ctx, "/lite/login");
   }
   if (path === "/lite") return redirect(ctx, "/lite/shift");
+  if (path === "/lite/alerts") return alerts(ctx);
   const flash = takeFlash(ctx);
   const render = (
     title: string,
