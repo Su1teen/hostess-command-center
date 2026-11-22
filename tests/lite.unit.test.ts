@@ -484,3 +484,72 @@ describe("lite: WhatsApp (Dayan)", () => {
     expect(html).toMatch(/WhatsApp<span class="badge">1<\/span>/);
   });
 });
+
+describe("lite: manager bulk clean-up", () => {
+  const A = "11111111-1111-4111-8111-111111111111";
+  const B = "22222222-2222-4222-8222-222222222222";
+  test("only managers can open it; it lists the queue with unchecked boxes", async () => {
+    const operator = fakeApi({ "GET /me": me });
+    const denied = (await operator.handle(get("/lite/orders/bulk")))!;
+    expect(denied.headers.get("location")).toBe("/lite/orders");
+    const { handle } = fakeApi({
+      "GET /me": () => [200, { staff: { id: "boss", role: "manager" } }],
+      "GET /dine-in/operations": () => [
+        200,
+        {
+          orders: [order(), order({ id: B, number: "43", payableMinor: "89000" })],
+          newCount: 2,
+          workingCount: 0,
+          unpaidCount: 2,
+          hasMore: false,
+        },
+      ],
+    });
+    const html = await (await handle(get("/lite/orders/bulk")))!.text();
+    expect(html).toContain(`name="id" value="${A}"`);
+    expect(html).not.toContain("checked>");
+    expect(html).toContain("890 тг");
+    const all = await (await handle(get("/lite/orders/bulk?all=1")))!.text();
+    expect((all.match(/ checked>/g) ?? []).length).toBe(2);
+  });
+  test("cancel applies only to the checked orders, with the clean-up reason", async () => {
+    const { handle, calls } = fakeApi({
+      [`POST /dine-in/orders/${A}/cancel`]: () => [200, { order: {} }],
+    });
+    const body = new URLSearchParams({ _csrf: CSRF, action: "cancel" });
+    body.append("id", A);
+    const response = (await handle(
+      new Request(ORIGIN + "/lite/orders/bulk", {
+        method: "POST",
+        headers: {
+          cookie: `${STAFF_COOKIE}; hostess-lite-csrf=${CSRF}`,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      }),
+    ))!;
+    expect(calls).toEqual([
+      {
+        method: "POST",
+        path: `/dine-in/orders/${A}/cancel`,
+        body: { reason: "Тестовый заказ — массовая очистка менеджером" },
+        origin: ORIGIN,
+      },
+    ]);
+    expect(decodeURIComponent(response.headers.get("set-cookie") ?? "")).toContain(
+      "Отменено: 1 из 1",
+    );
+  });
+  test("close walks every remaining step and marks payment", async () => {
+    const { handle, calls } = fakeApi({
+      [`GET /dine-in/orders/${A}`]: () => [200, { order: order({ status: "preparing" }) }],
+      [`PATCH /dine-in/orders/${A}/status`]: () => [200, { order: {} }],
+    });
+    await handle(post("/lite/orders/bulk", { action: "close", id: A }));
+    expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([
+      { status: "delivered" },
+      { status: "closed" },
+      { manualPaymentReceived: true },
+    ]);
+  });
+});

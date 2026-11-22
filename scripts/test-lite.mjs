@@ -425,6 +425,37 @@ try {
   assert((await pausedNow()) === true, "Take-over must pause the agent in PostgreSQL");
   pass("no-JS WhatsApp: handoff on the shift, dialog, take over and give back persisted");
 
+  // Manager clean-up: cancel one test order, close another, keep the third untouched.
+  const keep = await guestOrder();
+  const junk = await guestOrder();
+  const served = await guestOrder();
+  await page.goto(BASE + "/lite/orders");
+  await submit(page, page.getByRole("link", { name: "Массовое закрытие" }));
+  await page.locator(`input[name="id"][value="${junk.id}"]`).check();
+  await page.screenshot({ path: "test-results/lite-bulk-1024x600.png", fullPage: true });
+  await submit(page, page.getByRole("button", { name: "Отменить отмеченные как тестовые" }));
+  await page.getByText("Отменено: 1 из 1.").waitFor();
+  await page.locator(`input[name="id"][value="${served.id}"]`).check();
+  await submit(page, page.getByRole("button", { name: "Закрыть отмеченные как обслуженные" }));
+  await page.getByText("Закрыто: 1 из 1.").waitFor();
+  const state = async (id) =>
+    (
+      await pool.query(
+        `SELECT status, manual_payment_at IS NOT NULL AS paid FROM ${schema}.dine_in_orders WHERE id=$1`,
+        [id],
+      )
+    ).rows[0];
+  assert((await state(junk.id)).status === "cancelled", "Checked order must be cancelled");
+  const closed = await state(served.id);
+  assert(closed.status === "closed" && closed.paid, "Closed order must be closed and paid");
+  assert((await state(keep.id)).status === "new", "Unchecked order must stay untouched");
+  assert(
+    (await page.locator(`input[name="id"][value="${keep.id}"]`).count()) === 1 &&
+      (await page.locator(`input[name="id"][value="${junk.id}"]`).count()) === 0,
+    "Queue must keep only the untouched order",
+  );
+  pass("manager bulk clean-up: cancel and close only the checked orders");
+
   await submit(page, page.getByRole("button", { name: "Выйти" }));
   assert(page.url().endsWith("/lite/login"), "Logout must return to login");
   await page.goto(BASE + "/lite/shift");

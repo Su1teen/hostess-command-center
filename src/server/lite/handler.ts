@@ -446,7 +446,9 @@ async function ordersPage(ctx: Ctx, staff: Staff) {
     STATUS_LABEL,
   )
     .map(([v, l]) => `<option value="${v}"${v === status ? " selected" : ""}>${l}</option>`)
-    .join("")}</select></div></div><button type="submit" class="btn dark">Найти</button></form>`;
+    .join(
+      "",
+    )}</select></div></div><button type="submit" class="btn dark">Найти</button>${staff.role === "manager" ? ' <a class="btn" href="/lite/orders/bulk">Массовое закрытие</a>' : ""}</form>`;
   return { inner, filters, src };
 }
 
@@ -718,6 +720,62 @@ async function chatPage(ctx: Ctx, staff: Staff, key: string) {
   return { head, inner, src: chatHref(key) };
 }
 
+const BULK_CANCEL_REASON = "Тестовый заказ — массовая очистка менеджером";
+
+/** Manager clean-up: every order still in the service queue, with checkboxes. */
+async function bulkPage(ctx: Ctx) {
+  const ops = await api<Operations>(ctx, "GET", "/dine-in/operations");
+  if (!ops.ok) return ops.status === 401 ? null : flashBlock({ kind: "err", text: ops.message });
+  const all = ctx.url.searchParams.get("all") === "1";
+  const orders = ops.data.orders;
+  let html = `<p><a href="/lite/orders">← К заказам</a></p><h1>Массовое закрытие</h1><p class="muted">Все заказы, которые ещё висят в очереди: не закрытые или без отметки оплаты. Отметьте ненужные и выберите действие. Нужные заказы не отмечайте.</p>`;
+  if (!orders.length)
+    return `${html}<div class="card"><p class="muted">Очередь пуста — закрывать нечего.</p></div>`;
+  html += `<p>${all ? '<a class="btn sm" href="/lite/orders/bulk">Снять все отметки</a>' : '<a class="btn sm" href="/lite/orders/bulk?all=1">Отметить все</a>'} <span class="muted small">В очереди: ${orders.length}</span></p>`;
+  const rows = orders
+    .map(
+      (o) =>
+        `<tr><td style="width:56px;text-align:center"><input type="checkbox" name="id" value="${o.id}" id="o${o.id}" style="width:28px;height:28px"${all ? " checked" : ""}></td><td><label for="o${o.id}" style="margin:0;font-size:15px;color:#111827"><b>№${esc(o.number)} · ${esc(placeName(o))}</b> · ${dateTime(o.acceptedAt)}<br><span class="small">${itemsLine(o)}</span><br><span class="pill ${esc(o.status)}">${esc(STATUS_LABEL[o.status] ?? o.status)}</span> <span class="small muted">${o.manualPaymentAt ? "оплата отмечена" : "без оплаты"}</span></label></td><td class="right bold" style="white-space:nowrap">${money(o.payableMinor)}</td></tr>`,
+    )
+    .join("");
+  html += form(
+    ctx,
+    "/lite/orders/bulk",
+    `<div class="card" style="padding:4px"><table class="bulk" style="width:100%;border-collapse:collapse">${rows}</table></div>
+<div class="card"><button type="submit" name="action" value="cancel" class="btn dark block">Отменить отмеченные как тестовые</button><p class="muted small">Заказ получит статус «Отменён» с причиной «${esc(BULK_CANCEL_REASON)}». Выручка не меняется. Подходит для тестовых заказов.</p>
+<button type="submit" name="action" value="close" class="btn block">Закрыть отмеченные как обслуженные</button><p class="muted small">Заказ проходит все шаги до «Закрыт» и получает отметку оплаты. Сумма попадёт в полученные деньги.</p></div>`,
+    { confirm: "Применить действие к отмеченным заказам? Отменить это нельзя." },
+  );
+  return html;
+}
+async function cancelOrder(ctx: Ctx, id: string): Promise<true | 401 | string> {
+  const result = await api(ctx, "POST", `/dine-in/orders/${id}/cancel`, {
+    reason: BULK_CANCEL_REASON,
+  });
+  return result.ok ? true : result.status === 401 ? 401 : result.message;
+}
+async function closeOrder(ctx: Ctx, id: string): Promise<true | 401 | string> {
+  const detail = await api<{ order: DineOrder }>(ctx, "GET", `/dine-in/orders/${id}`);
+  if (!detail.ok) return detail.status === 401 ? 401 : detail.message;
+  let status = detail.data.order.status;
+  if (status === "cancelled") return "заказ уже отменён";
+  while (NEXT_STEP[status]) {
+    const target = NEXT_STEP[status][0];
+    const step = await api(ctx, "PATCH", `/dine-in/orders/${id}/status`, { status: target });
+    if (!step.ok)
+      return step.status === 401 ? 401 : `№${detail.data.order.number}: ${step.message}`;
+    status = target as DineOrder["status"];
+  }
+  if (!detail.data.order.manualPaymentAt) {
+    const paid = await api(ctx, "PATCH", `/dine-in/orders/${id}/status`, {
+      manualPaymentReceived: true,
+    });
+    if (!paid.ok)
+      return paid.status === 401 ? 401 : `№${detail.data.order.number}: ${paid.message}`;
+  }
+  return true;
+}
+
 async function bookingsPage(ctx: Ctx) {
   const requested = ctx.url.searchParams.get("date") ?? "";
   const day = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : dateKey();
@@ -922,6 +980,15 @@ async function handleGet(ctx: Ctx, path: string): Promise<Response> {
       { live: true },
     );
   }
+  if (path === "/lite/orders/bulk") {
+    if (staff.role !== "manager")
+      return redirect(ctx, "/lite/orders", {
+        kind: "err",
+        text: "Массовое закрытие доступно менеджеру",
+      });
+    const html = await bulkPage(ctx);
+    return html === null ? relogin() : render("Массовое закрытие", "orders", html);
+  }
   if (path === "/lite/hall") {
     const view = await hallPage(ctx);
     if (!view) return partial ? respond(ctx, "", 401) : relogin();
@@ -1053,6 +1120,31 @@ async function handlePost(ctx: Ctx, path: string): Promise<Response> {
     return redirect(ctx, back, { kind: "ok", text });
   }
 
+  if (path === "/lite/orders/bulk") {
+    const ids = form
+      .getAll("id")
+      .filter((id) => UUID.test(id))
+      .slice(0, 200);
+    const action = form.get("action") === "close" ? "close" : "cancel";
+    if (!ids.length)
+      return redirect(ctx, "/lite/orders/bulk", {
+        kind: "err",
+        text: "Отметьте хотя бы один заказ",
+      });
+    let done = 0;
+    const failed: string[] = [];
+    for (const id of ids) {
+      const outcome = action === "cancel" ? await cancelOrder(ctx, id) : await closeOrder(ctx, id);
+      if (outcome === true) done++;
+      else if (outcome === 401) return fail({ status: 401, message: "" }, "/lite/login");
+      else failed.push(outcome);
+    }
+    const verb = action === "cancel" ? "Отменено" : "Закрыто";
+    return redirect(ctx, "/lite/orders/bulk", {
+      kind: failed.length ? "err" : "ok",
+      text: `${verb}: ${done} из ${ids.length}.${failed.length ? ` Не получилось: ${failed.slice(0, 5).join("; ")}` : ""}`,
+    });
+  }
   if (path === "/lite/whatsapp/pause") {
     const key = (form.get("key") ?? "").slice(0, 300);
     const paused = form.get("paused") === "yes";
