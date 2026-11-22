@@ -41,6 +41,7 @@ jobs:
       - run: npm run test:integration
       - run: npx playwright install --with-deps chromium webkit
       - run: node scripts/test-ui.mjs
+      - run: node scripts/test-lite.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

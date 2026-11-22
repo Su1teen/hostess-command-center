@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { AppShell } from "../components/layout/AppShell";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { LEGACY_REDIRECT } from "../lib/legacy-redirect";
 
 function NotFoundComponent() {
   return (
@@ -111,6 +112,11 @@ function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="ru">
       <head>
+        {/* Old tablets (no ES modules / no modern CSS) go to the server-rendered /lite. */}
+        <script dangerouslySetInnerHTML={{ __html: LEGACY_REDIRECT }} />
+        <noscript>
+          <meta httpEquiv="refresh" content="0;url=/lite" />
+        </noscript>
         <HeadContent />
       </head>
       <body>

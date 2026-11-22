@@ -1,5 +1,6 @@
 import "./lib/error-capture";
 import { handleBookingApi } from "./server/guest/api";
+import { handleLite } from "./server/lite";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
@@ -47,6 +48,8 @@ function isH3SwallowedErrorBody(body: string): boolean {
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    const lite = await handleLite(request);
+    if (lite) return lite;
     const api = await handleBookingApi(request);
     if (api) return api;
     try {

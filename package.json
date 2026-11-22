@@ -15,7 +15,8 @@
     "start": "node scripts/start.mjs",
     "booking:preflight": "node scripts/booking-preflight.mjs",
     "test": "bun run test:unit && node scripts/test-integration.mjs",
-    "test:unit": "bun test tests/dine-in.unit.test.ts tests/floor-operations.unit.test.ts tests/floor-viewport.unit.test.ts",
+    "test:unit": "bun test tests/dine-in.unit.test.ts tests/floor-operations.unit.test.ts tests/floor-viewport.unit.test.ts tests/lite.unit.test.ts",
+    "test:lite": "node scripts/test-lite.mjs",
     "test:integration": "node scripts/test-integration.mjs",
     "test:cross": "node scripts/test-service-cross.mjs"
   },
