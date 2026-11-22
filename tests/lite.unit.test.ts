@@ -381,3 +381,106 @@ describe("lite: actions", () => {
     expect(html).toContain("повтор безопасен");
   });
 });
+
+describe("lite: WhatsApp (Dayan)", () => {
+  const chats = [
+    {
+      chatKey: "xoxo:77010000000@c.us",
+      chatId: "77010000000@c.us",
+      phone: "+77010000000",
+      guestName: "Дана <i>",
+      paused: true,
+      pausedReason: "просит менеджера",
+      pausedAt: null,
+      lastMessageAt: new Date().toISOString(),
+      lastMessage: "Можно позвать администратора?",
+      bookings: 1,
+    },
+    {
+      chatKey: "xoxo:77020000000@c.us",
+      chatId: "77020000000@c.us",
+      phone: null,
+      guestName: null,
+      paused: false,
+      pausedReason: null,
+      pausedAt: null,
+      lastMessageAt: new Date().toISOString(),
+      lastMessage: "Спасибо!",
+      bookings: 0,
+    },
+  ];
+  test("list shows chats waiting for staff first and flags them for the sound", async () => {
+    const { handle } = fakeApi({
+      "GET /me": me,
+      "GET /agent/conversations": () => [200, { conversations: chats }],
+    });
+    const response = (await handle(get("/lite/whatsapp")))!;
+    const html = await response.text();
+    expect(html.indexOf("Ждут сотрудника")).toBeLessThan(html.indexOf("Все диалоги"));
+    expect(html).toContain("Дана &lt;i&gt;");
+    expect(html).toContain("просит менеджера");
+    expect(html).toContain("/lite/whatsapp/chat?key=xoxo%3A77010000000%40c.us");
+    const partial = (await handle(get("/lite/whatsapp?partial=1")))!;
+    expect(partial.headers.get("x-lite-new")).toBe("wa:xoxo:77010000000@c.us");
+  });
+  test("chat shows the conversation and the take-over / give-back action", async () => {
+    const { handle, calls } = fakeApi({
+      "GET /me": me,
+      "GET /agent/conversations": () => [200, { conversations: chats }],
+      "GET /agent/conversations/messages": () => [
+        200,
+        {
+          messages: [
+            { id: "1", role: "guest", text: "Привет\nесть стол?", at: new Date().toISOString() },
+            { id: "2", role: "agent", text: "<b>Да</b>", at: new Date().toISOString() },
+          ],
+        },
+      ],
+    });
+    const html = await (await handle(
+      get("/lite/whatsapp/chat?key=" + encodeURIComponent(chats[0].chatKey)),
+    ))!.text();
+    expect(
+      calls.some((c) => c.path === "/agent/conversations/messages?key=xoxo%3A77010000000%40c.us"),
+    ).toBe(true);
+    expect(html).toContain("Привет<br>есть стол?");
+    expect(html).toContain("&lt;b&gt;Да&lt;/b&gt;");
+    expect(html).toContain("Вернуть ИИ");
+    expect(html).toContain('href="https://wa.me/77010000000"');
+  });
+  test("pause/resume maps to the agent API and returns to the chat", async () => {
+    const { handle, calls } = fakeApi({
+      "POST /agent/conversations/pause": () => [200, { conversation: {} }],
+    });
+    const response = (await handle(
+      post("/lite/whatsapp/pause", { key: chats[1].chatKey, paused: "yes" }),
+    ))!;
+    expect(calls[0]).toEqual({
+      method: "POST",
+      path: "/agent/conversations/pause?key=xoxo%3A77020000000%40c.us",
+      body: { paused: true, reason: "отвечает сотрудник" },
+      origin: ORIGIN,
+    });
+    expect(response.headers.get("location")).toBe(
+      "/lite/whatsapp/chat?key=xoxo%3A77020000000%40c.us",
+    );
+    await handle(post("/lite/whatsapp/pause", { key: chats[0].chatKey, paused: "no" }));
+    expect(calls[1].body).toEqual({ paused: false });
+  });
+  test("shift warns about chats waiting for staff and badges the nav", async () => {
+    const { handle } = fakeApi({
+      "GET /me": me,
+      "GET /dine-in/operations": () => [
+        200,
+        { orders: [], newCount: 0, workingCount: 0, unpaidCount: 0, hasMore: false },
+      ],
+      "GET /dine-in/booking-requests": () => [200, { requests: [] }],
+      "GET /floor": () => [200, { zones: [] }],
+      "GET /agent/conversations": () => [200, { conversations: chats }],
+    });
+    const response = (await handle(get("/lite/shift")))!;
+    const html = await response.text();
+    expect(html).toContain("WhatsApp: ждут сотрудника · 1");
+    expect(html).toMatch(/WhatsApp<span class="badge">1<\/span>/);
+  });
+});

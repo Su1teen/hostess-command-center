@@ -332,11 +332,13 @@ async function shiftPage(ctx: Ctx, staff: Staff) {
   const filter = ["new", "working", "unpaid"].includes(ctx.url.searchParams.get("f") ?? "")
     ? ctx.url.searchParams.get("f")!
     : "all";
-  const [ops, requests, floor] = await Promise.all([
+  const [ops, requests, floor, chats] = await Promise.all([
     api<Operations>(ctx, "GET", "/dine-in/operations"),
     api<{ requests: BookingRequest[] }>(ctx, "GET", "/dine-in/booking-requests"),
     api<FloorSnapshot>(ctx, "GET", "/floor"),
+    api<{ conversations: Conversation[] }>(ctx, "GET", "/agent/conversations"),
   ]);
+  const waiting = chats.ok ? chats.data.conversations.filter((c) => c.paused) : [];
   if (!ops.ok && ops.status === 401) return null;
   const data = ops.ok ? ops.data : null;
   const orders = (data?.orders ?? []).filter((o) =>
@@ -356,6 +358,13 @@ async function shiftPage(ctx: Ctx, staff: Staff) {
     inner += flashBlock({ kind: "err", text: `${ops.message} · данные могут быть устаревшими` });
   inner += `<table class="tiles"><tr>${tile("new", "Новые", data?.newCount)}${tile("working", "В работе", data?.workingCount)}${tile("unpaid", "К оплате", data?.unpaidCount)}</tr></table>`;
   inner += `<p>${filter === "all" ? "<b>Все задачи</b>" : '<a class="btn sm" href="/lite/shift">Показать все задачи</a>'}</p>`;
+  if (waiting.length)
+    inner += `<div class="card warn"><h2>WhatsApp: ждут сотрудника · ${waiting.length}</h2>${waiting
+      .map(
+        (c) =>
+          `<p><a href="${chatHref(c.chatKey)}"><b>${esc(chatLabel(c))}</b> · ${esc(c.pausedReason ?? "нужен сотрудник")}</a></p>`,
+      )
+      .join("")}</div>`;
   const resources = floor.ok ? bookableResources(floor.data) : [];
   if (requests.ok && requests.data.requests.length) {
     inner += `<div class="card warn"><h2>Заявки на бронирование · ${requests.data.requests.length}</h2>`;
@@ -404,8 +413,15 @@ async function shiftPage(ctx: Ctx, staff: Staff) {
   const newIds = (data?.orders ?? [])
     .filter((o) => o.status === "new")
     .map((o) => o.id)
+    .concat(waiting.map((c) => `wa:${c.chatKey}`))
     .join(",");
-  return { inner, newIds, newCount: data?.newCount ?? 0, src: back };
+  return {
+    inner,
+    newIds,
+    newCount: data?.newCount ?? 0,
+    waitingCount: waiting.length,
+    src: back,
+  };
 }
 
 async function ordersPage(ctx: Ctx, staff: Staff) {
@@ -618,6 +634,90 @@ function bookingForm(ctx: Ctx, r: FloorResource) {
   )}<p class="muted small">Дата и время — по Алматы. Формат даты: 2026-11-22, времени: 19:30.</p></div>`;
 }
 
+type Conversation = {
+  chatKey: string;
+  chatId: string;
+  phone: string | null;
+  guestName: string | null;
+  paused: boolean;
+  pausedReason: string | null;
+  lastMessageAt: string;
+  lastMessage: string | null;
+  bookings: number;
+};
+type ChatMessage = { id: string; role: "guest" | "agent" | "system"; text: string; at: string };
+const chatLabel = (c: Conversation) => c.guestName || c.phone || c.chatId.replace(/@.*/, "");
+const chatHref = (key: string) => `/lite/whatsapp/chat?key=${encodeURIComponent(key)}`;
+function waLink(phone: string | null) {
+  const digits = (phone ?? "").replace(/\D/g, "");
+  return digits.length === 11 ? `https://wa.me/${digits}` : null;
+}
+function chatRow(c: Conversation) {
+  return `<a class="card title${c.paused ? " warn" : ""}" href="${chatHref(c.chatKey)}" style="display:block;text-decoration:none"><div class="cf"><span class="muted small" style="float:right">${dateTime(c.lastMessageAt)}</span><b>${esc(chatLabel(c))}</b></div>${c.guestName && c.phone ? `<p class="muted small">${esc(c.phone)}</p>` : ""}${c.paused ? `<p class="small bold" style="color:#92400e">ИИ остановлен: ${esc(c.pausedReason ?? "нужен сотрудник")}</p>` : ""}<p class="small">${esc((c.lastMessage ?? "").slice(0, 160))}</p>${c.bookings ? `<span class="pill delivered">Броней: ${c.bookings}</span>` : ""}</a>`;
+}
+
+async function whatsappPage(ctx: Ctx) {
+  const list = await api<{ conversations: Conversation[] }>(ctx, "GET", "/agent/conversations");
+  if (!list.ok)
+    return list.status === 401
+      ? null
+      : { inner: flashBlock({ kind: "err", text: list.message }), newIds: "" };
+  const all = list.data.conversations;
+  const waiting = all.filter((c) => c.paused);
+  let inner = "";
+  if (waiting.length)
+    inner += `<h2 style="color:#92400e">Ждут сотрудника · ${waiting.length}</h2>${grid(waiting.map(chatRow))}`;
+  inner += `<h2>Все диалоги</h2>`;
+  const rest = all.filter((c) => !c.paused);
+  inner += rest.length
+    ? grid(rest.map(chatRow))
+    : '<div class="card"><p class="muted">Диалогов пока нет — они появятся, когда гости напишут в WhatsApp.</p></div>';
+  return { inner, newIds: waiting.map((c) => `wa:${c.chatKey}`).join(",") };
+}
+
+async function chatPage(ctx: Ctx, staff: Staff, key: string) {
+  const [list, messages] = await Promise.all([
+    api<{ conversations: Conversation[] }>(ctx, "GET", "/agent/conversations"),
+    api<{ messages: ChatMessage[] }>(
+      ctx,
+      "GET",
+      `/agent/conversations/messages?key=${encodeURIComponent(key)}`,
+    ),
+  ]);
+  if (messages.status === 401 || list.status === 401) return null;
+  const c = list.ok ? list.data.conversations.find((item) => item.chatKey === key) : undefined;
+  let inner = "";
+  if (!messages.ok) inner += flashBlock({ kind: "err", text: messages.message });
+  for (const m of messages.ok ? messages.data.messages : []) {
+    if (m.role === "system")
+      inner += `<p class="muted small" style="text-align:center">${esc(m.text)} · ${dateTime(m.at)}</p>`;
+    else
+      inner += `<div class="cf"><div class="bubble ${m.role}">${esc(m.text).replace(/\n/g, "<br>")}<span class="when">${m.role === "agent" ? "Даян · " : ""}${dateTime(m.at)}</span></div></div>`;
+  }
+  if (messages.ok && !messages.data.messages.length)
+    inner += '<p class="muted">Сообщений пока нет.</p>';
+  let head = `<p><a href="/lite/whatsapp">← Все диалоги</a></p><h1>${esc(c ? chatLabel(c) : "Диалог")}</h1>${c?.phone ? `<p class="muted">${esc(c.phone)}</p>` : ""}`;
+  if (c?.paused)
+    head += `<p class="flash err">ИИ в этом чате молчит: ${esc(c.pausedReason ?? "нужен сотрудник")}. Ответьте гостю в WhatsApp, затем верните ИИ.</p>`;
+  const actions: string[] = [];
+  if (c && canWrite(staff))
+    actions.push(
+      form(
+        ctx,
+        "/lite/whatsapp/pause",
+        `${hidden("key", key)}${hidden("paused", c.paused ? "no" : "yes")}<button type="submit" class="btn ${c.paused ? "ok" : "dark"}">${c.paused ? "Вернуть ИИ" : "Ответить самому"}</button>`,
+        {
+          cls: "inline",
+          ...(c.paused ? {} : { confirm: "Остановить ИИ в этом чате? Отвечать гостю будете вы." }),
+        },
+      ),
+    );
+  const wa = waLink(c?.phone ?? null);
+  if (wa) actions.push(`<a class="btn" href="${wa}">Открыть WhatsApp</a>`);
+  head += `<p>${actions.join(" ")}</p>`;
+  return { head, inner, src: chatHref(key) };
+}
+
 async function bookingsPage(ctx: Ctx) {
   const requested = ctx.url.searchParams.get("date") ?? "";
   const day = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : dateKey();
@@ -791,7 +891,7 @@ async function handleGet(ctx: Ctx, path: string): Promise<Response> {
     title: string,
     nav: Nav,
     body: string,
-    extra: { live?: boolean; newCount?: number } = {},
+    extra: { live?: boolean; newCount?: number; waitingCount?: number } = {},
   ) =>
     respond(
       ctx,
@@ -808,7 +908,7 @@ async function handleGet(ctx: Ctx, path: string): Promise<Response> {
       "Смена",
       "shift",
       `<h1>Смена</h1><p class="muted">Стол, заказ и следующее действие — в одной очереди.</p>${canWrite(staff) ? '<a class="btn dark" href="/lite/new">+ Создать заказ</a>' : ""}${liveWrap(view.src, view.inner, view.newIds)}`,
-      { live: true, newCount: view.newCount },
+      { live: true, newCount: view.newCount, waitingCount: view.waitingCount },
     );
   }
   if (path === "/lite/orders") {
@@ -832,6 +932,27 @@ async function handleGet(ctx: Ctx, path: string): Promise<Response> {
       `<h1>Зал</h1><p class="muted">Нажмите на стол, чтобы посадить гостей, создать заказ или бронь.</p>${liveWrap("/lite/hall", view.inner, "")}`,
       { live: true },
     );
+  }
+  if (path === "/lite/whatsapp") {
+    const view = await whatsappPage(ctx);
+    if (!view) return partial ? respond(ctx, "", 401) : relogin();
+    if (partial) return respond(ctx, view.inner, 200, { "x-lite-new": view.newIds });
+    return render(
+      "WhatsApp",
+      "whatsapp",
+      `<h1>Даян · WhatsApp</h1><p class="muted">Даян отвечает гостям и ставит брони. Если он передал чат сотруднику — чат наверху, ИИ в нём молчит, пока вы не вернёте его.</p>${liveWrap("/lite/whatsapp", view.inner, view.newIds)}`,
+      { live: true },
+    );
+  }
+  if (path === "/lite/whatsapp/chat") {
+    const key = (ctx.url.searchParams.get("key") ?? "").slice(0, 300);
+    if (!key) return redirect(ctx, "/lite/whatsapp");
+    const view = await chatPage(ctx, staff, key);
+    if (!view) return partial ? respond(ctx, "", 401) : relogin();
+    if (partial) return respond(ctx, view.inner, 200);
+    return render("WhatsApp", "whatsapp", view.head + liveWrap(view.src, view.inner, ""), {
+      live: true,
+    });
   }
   if (path === "/lite/bookings") {
     const html = await bookingsPage(ctx);
@@ -932,6 +1053,22 @@ async function handlePost(ctx: Ctx, path: string): Promise<Response> {
     return redirect(ctx, back, { kind: "ok", text });
   }
 
+  if (path === "/lite/whatsapp/pause") {
+    const key = (form.get("key") ?? "").slice(0, 300);
+    const paused = form.get("paused") === "yes";
+    const back = key ? chatHref(key) : "/lite/whatsapp";
+    const result = await api(
+      ctx,
+      "POST",
+      `/agent/conversations/pause?key=${encodeURIComponent(key)}`,
+      paused ? { paused: true, reason: "отвечает сотрудник" } : { paused: false },
+    );
+    if (!result.ok) return fail(result, back);
+    return redirect(ctx, back, {
+      kind: "ok",
+      text: paused ? "ИИ остановлен — ответьте гостю в WhatsApp" : "ИИ снова отвечает в этом чате",
+    });
+  }
   const requestMatch = /^\/lite\/request\/([a-f0-9-]{36})$/i.exec(path);
   if (requestMatch) {
     const confirm = form.get("action") === "confirm";

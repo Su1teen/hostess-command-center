@@ -108,6 +108,9 @@ textarea.field{min-height:80px}
 .jump a{display:inline-block;margin:0 6px 6px 0;padding:8px 12px;background:#f3f4f6;-webkit-border-radius:10px;border-radius:10px;text-decoration:none;font-size:14px}
 .history{margin:6px 0 0;padding:0 0 0 12px;border-left:2px solid #e5e7eb;list-style:none}
 .history li{margin:0 0 8px;font-size:13px;color:#4b5563}
+.bubble{max-width:82%;margin:0 0 8px;padding:9px 12px;-webkit-border-radius:16px;border-radius:16px;font-size:15px;line-height:1.35;word-wrap:break-word;background:#ffffff;border:1px solid #e5e7eb;float:left}
+.bubble.agent{float:right;background:#111827;border-color:#111827;color:#ffffff}
+.bubble .when{display:block;margin-top:4px;font-size:11px;color:#9ca3af}
 .login{max-width:420px;margin:30px auto;padding:0 14px}
 .login .card{padding:22px}
 .foot{padding:20px 12px 40px;text-align:center;font-size:13px;color:#9ca3af}

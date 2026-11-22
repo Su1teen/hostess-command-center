@@ -60,7 +60,7 @@ export function minutesAgo(value: string, now = Date.now()) {
   return Math.max(0, Math.floor((now - Date.parse(value)) / 60000));
 }
 
-export type Nav = "shift" | "orders" | "hall" | "bookings" | "new" | "";
+export type Nav = "shift" | "orders" | "hall" | "bookings" | "whatsapp" | "new" | "";
 export type Flash = { kind: "ok" | "err"; text: string } | null;
 export type Staff = { id: string; role: string };
 
@@ -86,6 +86,7 @@ export function page(input: {
   nav?: Nav;
   csrf?: string;
   newCount?: number;
+  waitingCount?: number;
   /** Data source for the live region; enables polling and a no-JS refresh. */
   live?: boolean;
 }) {
@@ -97,7 +98,7 @@ export function page(input: {
 <div class="who"><span class="id">${esc(ROLE_LABEL[staff.role] ?? staff.role)} · ${esc(staff.id)}</span>
 <button id="sound" type="button" class="btn sm hide">Звук</button>
 <form method="post" action="/lite/logout" class="inline" accept-charset="utf-8">${csrfField(csrf)}<button type="submit" class="btn sm">Выйти</button></form></div></div>
-<div class="nav">${link("shift", "/lite/shift", `Смена${input.newCount ? `<span class="badge">${input.newCount}</span>` : ""}`)}${link("orders", "/lite/orders", "Заказы")}${link("hall", "/lite/hall", "Зал")}${link("bookings", "/lite/bookings", "Брони")}${staff.role !== "viewer" ? link("new", "/lite/new", "+ Заказ", " add") : ""}</div>`
+<div class="nav">${link("shift", "/lite/shift", `Смена${input.newCount ? `<span class="badge">${input.newCount}</span>` : ""}`)}${link("orders", "/lite/orders", "Заказы")}${link("hall", "/lite/hall", "Зал")}${link("bookings", "/lite/bookings", "Брони")}${link("whatsapp", "/lite/whatsapp", `WhatsApp${input.waitingCount ? `<span class="badge">${input.waitingCount}</span>` : ""}`)}${staff.role !== "viewer" ? link("new", "/lite/new", "+ Заказ", " add") : ""}</div>`
     : "";
   return `<!DOCTYPE html>
 <html lang="ru">

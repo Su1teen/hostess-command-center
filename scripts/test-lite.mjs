@@ -45,6 +45,7 @@ const env = {
   EXCHANGE_DATA_MODE: "api",
   HOSTESS_BFF_KEY: key,
   COMMAND_CENTER_SERVICE_KEY: "s".repeat(43),
+  WHATSAPP_SERVICE_KEY: "w".repeat(43),
   ALLOW_GUEST_BOOKING_MIGRATION: "yes",
   DINE_IN_ENABLED: "yes",
   DINE_IN_PILOT_ASSUMED_PAID: "yes",
@@ -377,6 +378,51 @@ try {
     await page.screenshot({ path: `test-results/lite-orders-${w}x${h}.png`, fullPage: true });
   }
   pass("no horizontal overflow at 800×480 and 600×1024");
+
+  // WhatsApp (Dayan): a guest asks for a human, staff take over and give the chat back.
+  const agentCall = async (path, payload) => {
+    const response = await fetch("http://localhost:3000/api/agent/v1" + path, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-hostess-service-key": "w".repeat(43) },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok)
+      throw new Error(
+        "Agent " + path + " failed: " + response.status + " " + (await response.text()),
+      );
+    return response.json();
+  };
+  await agentCall("/inbound", {
+    session: "xoxo",
+    chatId: "77010000000@c.us",
+    messageId: "lite-" + randomUUID(),
+    text: "Здравствуйте, позовите администратора <b>",
+    phone: "+77010000000",
+    pushName: "Дана Lite",
+  });
+  const chatKey = "xoxo:77010000000@c.us";
+  await agentCall("/handoff", { chatKey, reason: "просит администратора" });
+  await page.goto(BASE + "/lite/shift");
+  await page.getByText("WhatsApp: ждут сотрудника · 1").waitFor();
+  await page.goto(BASE + "/lite/whatsapp");
+  await page.getByText("Ждут сотрудника · 1").waitFor();
+  await page.screenshot({ path: "test-results/lite-whatsapp-1024x600.png", fullPage: true });
+  await page.getByText("Дана Lite").first().click();
+  await page.getByText("Здравствуйте, позовите администратора <b>").waitFor();
+  await page.screenshot({ path: "test-results/lite-whatsapp-chat-1024x600.png", fullPage: true });
+  const pausedNow = async () =>
+    (
+      await pool.query(`SELECT agent_paused AS paused FROM ${schema}.dayan_conversations WHERE chat_key=$1`, [
+        chatKey,
+      ])
+    ).rows[0].paused;
+  await submit(page, page.getByRole("button", { name: "Вернуть ИИ" }));
+  await page.getByText("ИИ снова отвечает в этом чате").waitFor();
+  assert((await pausedNow()) === false, "Give-back must resume the agent in PostgreSQL");
+  await submit(page, page.getByRole("button", { name: "Ответить самому" }));
+  await page.getByText("ИИ остановлен — ответьте гостю в WhatsApp").waitFor();
+  assert((await pausedNow()) === true, "Take-over must pause the agent in PostgreSQL");
+  pass("no-JS WhatsApp: handoff on the shift, dialog, take over and give back persisted");
 
   await submit(page, page.getByRole("button", { name: "Выйти" }));
   assert(page.url().endsWith("/lite/login"), "Logout must return to login");
