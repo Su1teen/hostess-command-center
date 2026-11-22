@@ -412,9 +412,10 @@ try {
   await page.screenshot({ path: "test-results/lite-whatsapp-chat-1024x600.png", fullPage: true });
   const pausedNow = async () =>
     (
-      await pool.query(`SELECT agent_paused AS paused FROM ${schema}.dayan_conversations WHERE chat_key=$1`, [
-        chatKey,
-      ])
+      await pool.query(
+        `SELECT agent_paused AS paused FROM ${schema}.dayan_conversations WHERE chat_key=$1`,
+        [chatKey],
+      )
     ).rows[0].paused;
   await submit(page, page.getByRole("button", { name: "Вернуть ИИ" }));
   await page.getByText("ИИ снова отвечает в этом чате").waitFor();
