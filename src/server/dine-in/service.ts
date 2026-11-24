@@ -222,9 +222,9 @@ export async function orderDetail(client: Pick<PoolClient, "query">, id: string,
     await client.query(
       `SELECT o.id,o.number::text,o.venue_id AS "venueId",v.slug AS "venueCode",o.guest_id AS "guestId",o.dining_session_id AS "diningSessionId",o.table_resource_id AS "tableResourceId",r.code AS "tableCode",r.name AS "tableName",z.name AS "zoneName",
     COALESCE((SELECT e.details->>'source' FROM dine_in_order_events e WHERE e.order_id=o.id AND e.type='created' ORDER BY e.created_at,e.id LIMIT 1),'qr') AS source,
-    g.name AS "guestName",g.phone AS "guestPhone",o.status,o.payment_status AS "paymentStatus",o.manual_payment_at AS "manualPaymentAt",o.accepted_at AS "acceptedAt",
+    g.name AS "guestName",g.phone AS "guestPhone",o.status,o.payment_status AS "paymentStatus",o.manual_payment_at AS "manualPaymentAt",o.accepted_at AS "acceptedAt",o.archived_at AS "archivedAt",
     (SELECT l.expires_at FROM loyalty_lots l WHERE l.order_id=o.id) AS "cashbackExpiresAt",o.subtotal_minor::text AS "subtotalMinor",o.discount_minor::text AS "discountMinor",o.payable_minor::text AS "payableMinor",o.cashback_minor::text AS "cashbackMinor",
-    (SELECT COALESCE(jsonb_agg(jsonb_build_object('id',i.id,'productId',COALESCE(i.exchange_product_id,i.menu_item_id::text),'itemType',i.item_type,'menuVersion',i.menu_version,'name',i.name,'quantity',i.quantity,'unitPriceMinor',i.unit_price_minor::text,'totalMinor',i.total_minor::text,'roundId',i.round_id) ORDER BY i.id),'[]') FROM dine_in_order_items i WHERE i.order_id=o.id) AS items,
+    (SELECT COALESCE(jsonb_agg(jsonb_build_object('id',i.id,'productId',COALESCE(i.exchange_product_id,i.menu_item_id::text),'itemType',i.item_type,'menuVersion',i.menu_version,'name',i.name,'quantity',i.quantity,'unitPriceMinor',i.unit_price_minor::text,'totalMinor',i.total_minor::text,'roundId',i.round_id,'priceLevelPercent',i.price_level_percent,'originalPriceMinor',i.original_price_minor::text) ORDER BY i.id),'[]') FROM dine_in_order_items i WHERE i.order_id=o.id) AS items,
     (SELECT COALESCE(jsonb_agg(jsonb_build_object('id',e.id,'type',e.type,'actor',e.actor,'details',e.details,'createdAt',e.created_at) ORDER BY e.created_at,e.id),'[]') FROM dine_in_order_events e WHERE e.order_id=o.id) AS events
     FROM dine_in_orders o JOIN hostess_venues v ON v.id=o.venue_id JOIN venue_resources r ON r.id=o.table_resource_id JOIN venue_zones z ON z.id=r.zone_id
     LEFT JOIN hostess_guests g ON g.id=o.guest_id WHERE o.id=$1 AND o.venue_id=$2`,
@@ -266,10 +266,42 @@ export async function enqueue(
   );
 }
 export async function checkout(owner: Owner, raw: unknown, staffActor?: string) {
+  return transaction((client) => checkoutIn(client, owner, raw, staffActor));
+}
+/** Staff basket mixing exchange and regular items becomes two separate orders in ONE transaction:
+ * if either quote went stale nothing is created, so a re-quote never duplicates the other order. */
+export async function checkoutPair(
+  owner: Owner,
+  raw: unknown,
+  companionQuoteId: string,
+  staffActor: string,
+) {
+  const input = orderInput.parse(raw);
+  return transaction(async (client) => {
+    const main = await checkoutIn(client, owner, input, staffActor);
+    const companion = await checkoutIn(
+      client,
+      owner,
+      { quoteId: companionQuoteId, idempotencyKey: input.idempotencyKey.slice(0, 100) + ":ex" },
+      staffActor,
+    );
+    return { main, companion };
+  });
+}
+async function checkoutIn(
+  client: PoolClient,
+  owner: Owner,
+  raw: unknown,
+  staffActor?: string,
+): Promise<{
+  order: Awaited<ReturnType<typeof orderDetail>>;
+  receiptToken?: string;
+  replayed: boolean;
+}> {
   const input = orderInput.parse(raw);
   if (process.env.DINE_IN_PILOT_ASSUMED_PAID !== "yes")
     throw new ApiError(503, "PAYMENT_MODE_REQUIRED", "Оформление заказа временно отключено");
-  return transaction(async (client) => {
+  {
     await loyaltyLock(client);
     // Keep the physical mapping/visit lock before QR row locks, matching staff writers.
     await floorLock(client);
@@ -396,8 +428,8 @@ export async function checkout(owner: Owner, raw: unknown, staffActor?: string) 
       );
     for (const line of quote.lines as Line[])
       await client.query(
-        `INSERT INTO dine_in_order_items(venue_id,order_id,exchange_product_id,round_id,name,quantity,unit_price_minor,total_minor,item_type,source,menu_item_id,menu_version)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        `INSERT INTO dine_in_order_items(venue_id,order_id,exchange_product_id,round_id,name,quantity,unit_price_minor,total_minor,item_type,source,menu_item_id,menu_version,price_level_percent,original_price_minor)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
         [
           qr.venue_id,
           order.id,
@@ -411,6 +443,8 @@ export async function checkout(owner: Owner, raw: unknown, staffActor?: string) 
           line.itemType === "REGULAR_MENU" ? "regular_menu" : "exchange",
           line.itemType === "REGULAR_MENU" ? line.productId : null,
           line.menuVersion ?? null,
+          line.itemType === "REGULAR_MENU" ? null : (line.priceLevelPercent ?? null),
+          line.itemType === "REGULAR_MENU" ? null : (line.originalPriceMinor ?? null),
         ],
       );
     // Validate using wall clock after all locks and writes; never accept a stale round.
@@ -435,7 +469,7 @@ export async function checkout(owner: Owner, raw: unknown, staffActor?: string) 
       receiptToken,
       replayed: false,
     };
-  });
+  }
 }
 export async function changeStatus(
   id: string,
@@ -512,6 +546,45 @@ export async function changeStatus(
       `UPDATE dining_sessions SET last_activity_at=clock_timestamp(),version=version+1 WHERE id=$1 AND closed_at IS NULL`,
       [order.dining_session_id],
     );
+    return orderDetail(client, id, venueId);
+  });
+}
+/** Send a finished order to the archive: it leaves the shift queue and the default list.
+ * Money, loyalty and history are untouched; `restore` brings it back. */
+export async function archiveOrder(id: string, venueId: string, staffId: string, restore = false) {
+  return transaction(async (client) => {
+    const order = (
+      await client.query("SELECT * FROM dine_in_orders WHERE id=$1 AND venue_id=$2 FOR UPDATE", [
+        id,
+        venueId,
+      ])
+    ).rows[0];
+    if (!order) throw new ApiError(404, "NOT_FOUND", "Заказ не найден");
+    const actor = `staff:${staffId}`;
+    if (restore) {
+      if (!order.archived_at) return orderDetail(client, id, venueId);
+      await client.query(
+        "UPDATE dine_in_orders SET archived_at=NULL,archived_by=NULL,updated_at=now() WHERE id=$1",
+        [id],
+      );
+      await event(client, order, actor, "unarchived");
+      return orderDetail(client, id, venueId);
+    }
+    if (order.archived_at) return orderDetail(client, id, venueId);
+    const finished =
+      ["closed", "cancelled"].includes(order.status) ||
+      (order.status === "delivered" && order.manual_payment_at);
+    if (!finished)
+      throw new ApiError(
+        409,
+        "ORDER_NOT_FINISHED",
+        "В архив можно убрать завершённый, отменённый или поданный и оплаченный заказ",
+      );
+    await client.query(
+      "UPDATE dine_in_orders SET archived_at=now(),archived_by=$2,updated_at=now() WHERE id=$1",
+      [id, staffId],
+    );
+    await event(client, order, actor, "archived");
     return orderDetail(client, id, venueId);
   });
 }

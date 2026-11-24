@@ -252,6 +252,65 @@ describe("lite: loud new-order alarm", () => {
       "33333333-3333-4333-8333-333333333333\tБар стойка · №44",
     ]);
   });
+  test("exchange orders are marked with a third column and use their own chime", async () => {
+    const exch = order({
+      id: "44444444-4444-4444-8444-444444444441",
+      number: "45",
+      items: [
+        {
+          id: "i1",
+          name: "Миллер",
+          quantity: 1,
+          unitPriceMinor: "115000",
+          totalMinor: "115000",
+          itemType: "EXCHANGE",
+          priceLevelPercent: -30,
+        },
+      ],
+    });
+    const { handle } = fakeApi({
+      ...routes(),
+      "GET /dine-in/operations": () => [
+        200,
+        { orders: [exch], newCount: 1, workingCount: 0, unpaidCount: 1, hasMore: false },
+      ],
+    });
+    expect(await (await handle(get("/lite/alerts")))!.text()).toBe(
+      "44444444-4444-4444-8444-444444444441	Стол 07 · №45	x",
+    );
+    const chime = (await handle(get("/lite/chime.wav")))!;
+    expect(chime.headers.get("content-type")).toBe("audio/wav");
+    const shift = await (await handle(get("/lite/shift")))!.text();
+    expect(shift).toContain("БИРЖА");
+    expect(shift).toContain("Уровень −30%");
+    expect(shift).toContain('class="card exch"');
+  });
+  test("finished orders get a × button that archives them", async () => {
+    const done = order({
+      id: "55555555-5555-4555-8555-555555555551",
+      status: "closed",
+      manualPaymentAt: "2026-11-24T10:00:00Z",
+    });
+    const { handle, calls } = fakeApi({
+      ...routes(),
+      "GET /dine-in/operations": () => [
+        200,
+        { orders: [done, order()], newCount: 1, workingCount: 0, unpaidCount: 0, hasMore: false },
+      ],
+      "POST /dine-in/orders/55555555-5555-4555-8555-555555555551/archive": () => [
+        200,
+        { order: done },
+      ],
+    });
+    const html = await (await handle(get("/lite/shift")))!.text();
+    expect(html).toContain("/lite/order/55555555-5555-4555-8555-555555555551/archive");
+    expect(html.split("/archive").length - 1).toBe(1);
+    const res = (await handle(
+      post("/lite/order/55555555-5555-4555-8555-555555555551/archive", { back: "/lite/shift" }),
+    ))!;
+    expect(res.status).toBe(303);
+    expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/archive"))).toBe(true);
+  });
   test("alerts without a session answer 401 so the tablet goes to login", async () => {
     const { handle } = fakeApi({ "GET /me": () => [401, { error: { code: "UNAUTHENTICATED" } }] });
     expect((await handle(get("/lite/alerts", "")))!.status).toBe(401);
@@ -436,7 +495,7 @@ describe("lite: actions", () => {
         key: "same-key-0123456789",
         session: "22222222-2222-4222-8222-222222222222",
         payable: "159000",
-        line0: "2|159000|Чай",
+        line0: "2|159000|r||Чай",
         expires: new Date().toISOString(),
       }),
     ))!.text();

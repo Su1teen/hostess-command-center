@@ -12,9 +12,9 @@
  * double-submit CSRF token.
  */
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import type { DineOrder } from "../../lib/dine-in-client";
+import { isExchangeOrder, canArchive, type DineOrder } from "../../lib/dine-in-client";
 import type { FloorResource, FloorSnapshot, FloorZone } from "../../lib/floor-operations";
-import { beepWav, bellWav } from "./assets";
+import { beepWav, bellWav, chimeWav } from "./assets";
 import {
   csrfField,
   dateKey,
@@ -257,8 +257,17 @@ function form(
 function placeName(o: { tableName?: string | null; tableCode: string }) {
   return o.tableName || `Стол ${o.tableCode}`;
 }
+function levelText(level: number | null | undefined) {
+  if (level == null) return "";
+  return `Уровень ${level > 0 ? "+" : level < 0 ? "\u2212" : ""}${Math.abs(level)}%`;
+}
 function itemsLine(o: DineOrder) {
-  return o.items.map((i) => `${i.quantity} × ${esc(i.name)}`).join(", ");
+  return o.items
+    .map(
+      (i) =>
+        `${i.quantity} × ${esc(i.name)}${i.priceLevelPercent != null ? ` (${levelText(i.priceLevelPercent)})` : ""}`,
+    )
+    .join(", ");
 }
 
 /* ---------------- views ---------------- */
@@ -287,8 +296,18 @@ function orderCard(ctx: Ctx, staff: Staff, o: DineOrder, back: string) {
           : ""
       }`
     : "";
-  return `<div class="card${o.status === "new" ? " new" : ""}${late ? " late" : ""}">
-<a class="title" href="/lite/order/${o.id}"><h2>${esc(placeName(o))}${o.zoneName ? ` <span class="muted">· ${esc(o.zoneName)}</span>` : ""}</h2>
+  const exch = isExchangeOrder(o);
+  const archiveForm =
+    canWrite(staff) && (canArchive(o) || o.archivedAt)
+      ? form(
+          ctx,
+          `/lite/order/${o.id}/${o.archivedAt ? "unarchive" : "archive"}`,
+          `${hidden("back", back)}<button type="submit" class="xbtn" title="${o.archivedAt ? "Вернуть из архива" : "Убрать в архив"}">${o.archivedAt ? "\u0412\u0435\u0440\u043d\u0443\u0442\u044c" : "\u00d7"}</button>`,
+          { cls: "xform" },
+        )
+      : "";
+  return `<div class="card${exch ? " exch" : o.status === "new" ? " new" : ""}${late ? " late" : ""}">
+${archiveForm}<a class="title" href="/lite/order/${o.id}"><h2>${exch ? '<span class="tagx">БИРЖА</span>' : ""}${esc(placeName(o))}${o.zoneName ? ` <span class="muted">· ${esc(o.zoneName)}</span>` : ""}</h2>
 <p><span class="pill ${esc(o.status)}">${esc(STATUS_LABEL[o.status] ?? o.status)}</span> <span class="${late ? "bold" : "muted"}" style="${late ? "color:#b91c1c" : ""}">№${esc(o.number)} · ${age} мин. назад</span></p>
 <p class="small">${itemsLine(o)}</p>
 ${o.source === "web_app" ? '<p class="small bold" style="color:#92400e">Через сайт · подтвердите у гостей</p>' : ""}
@@ -432,9 +451,11 @@ async function ordersPage(ctx: Ctx, staff: Staff) {
   const query = new URLSearchParams();
   if (status) query.set("status", status);
   query.set("q", q);
+  const archived = ctx.url.searchParams.get("archived") === "1";
+  if (archived) query.set("archived", "1");
   const list = await api<{ orders: DineOrder[] }>(ctx, "GET", `/dine-in/orders?${query}`);
   if (!list.ok && list.status === 401) return null;
-  const src = `/lite/orders${status || q ? `?${new URLSearchParams({ ...(status ? { status } : {}), ...(q ? { q } : {}) })}` : ""}`;
+  const src = `/lite/orders${status || q || archived ? `?${new URLSearchParams({ ...(status ? { status } : {}), ...(q ? { q } : {}), ...(archived ? { archived: "1" } : {}) })}` : ""}`;
   let inner = "";
   if (!list.ok) inner += flashBlock({ kind: "err", text: list.message });
   const orders = list.ok ? list.data.orders : [];
@@ -448,7 +469,7 @@ async function ordersPage(ctx: Ctx, staff: Staff) {
     .map(([v, l]) => `<option value="${v}"${v === status ? " selected" : ""}>${l}</option>`)
     .join(
       "",
-    )}</select></div></div><button type="submit" class="btn dark">Найти</button>${staff.role === "manager" ? ' <a class="btn" href="/lite/orders/bulk">Массовое закрытие</a>' : ""}</form>`;
+    )}</select></div></div>${archived ? hidden("archived", "1") : ""}<button type="submit" class="btn dark">Найти</button> <a class="btn" href="/lite/orders${archived ? "" : "?archived=1"}">${archived ? "Скрыть архив" : "Архив"}</a>${staff.role === "manager" ? ' <a class="btn" href="/lite/orders/bulk">Массовое закрытие</a>' : ""}</form>`;
   return { inner, filters, src };
 }
 
@@ -459,14 +480,14 @@ async function orderPage(ctx: Ctx, staff: Staff, id: string) {
   const o = detail.data.order;
   const back = `/lite/order/${o.id}`;
   const step = NEXT_STEP[o.status];
-  let html = `<p><a href="/lite/shift">← К смене</a></p><div class="card"><h1>№${esc(o.number)} · ${esc(placeName(o))}</h1>
+  let html = `<p><a href="/lite/shift">← К смене</a></p><div class="card"><h1>${isExchangeOrder(o) ? '<span class="tagx">БИРЖА</span>' : ""}№${esc(o.number)} · ${esc(placeName(o))}</h1>
 <p class="muted">${esc(o.zoneName)} · ${esc(SOURCE_LABEL[o.source ?? ""] ?? "Заказ")}</p>
 <p><span class="pill ${esc(o.status)}">${esc(STATUS_LABEL[o.status] ?? o.status)}</span> <span class="muted">${dateTime(o.acceptedAt)}</span></p>
 <p class="bold">${esc(o.guestName ?? "Гость без аккаунта")}</p>${o.guestPhone ? `<p><a href="tel:${esc(o.guestPhone)}">${esc(o.guestPhone)}</a></p>` : ""}
 <ul class="lines">${o.items
     .map(
       (i) =>
-        `<li class="cf"><span class="r">${money(i.totalMinor)}</span>${i.quantity} × ${esc(i.name)}<br><span class="muted small">${money(i.unitPriceMinor)} за ед. · ${i.itemType === "REGULAR_MENU" ? "Основное меню" : "Биржа напитков"}</span></li>`,
+        `<li class="cf"><span class="r">${money(i.totalMinor)}</span>${i.quantity} × ${esc(i.name)}<br><span class="muted small">${money(i.unitPriceMinor)} за ед. · ${i.itemType === "REGULAR_MENU" ? "Основное меню" : "Биржа напитков"}${i.priceLevelPercent != null ? ` · <b>${levelText(i.priceLevelPercent)}</b>` : ""}${i.originalPriceMinor ? ` · в меню ${money(i.originalPriceMinor)}` : ""}</span></li>`,
     )
     .join("")}</ul>
 <ul class="lines"><li class="cf"><span class="r">${money(o.subtotalMinor)}</span>Сумма позиций</li><li class="cf"><span class="r">${money(o.discountMinor)}</span>Списано бонусов</li><li class="cf"><span class="r">${money(o.cashbackMinor)}</span>Кэшбэк начислен</li></ul>
@@ -494,6 +515,12 @@ async function orderPage(ctx: Ctx, staff: Staff, id: string) {
         { confirm: "Отменить заказ? Действие нельзя отменить." },
       );
   }
+  if (canWrite(staff) && (canArchive(o) || o.archivedAt))
+    html += form(
+      ctx,
+      `/lite/order/${o.id}/${o.archivedAt ? "unarchive" : "archive"}`,
+      `${hidden("back", o.archivedAt ? "/lite/orders" : "/lite/shift")}<button type="submit" class="btn block">${o.archivedAt ? "Вернуть из архива" : "Убрать в архив"}</button>`,
+    );
   html += `<h3>История</h3><ol class="history">${o.events
     .map(
       (e) =>
@@ -504,6 +531,8 @@ async function orderPage(ctx: Ctx, staff: Staff, id: string) {
                 created: "Заказ создан",
                 manual_payment_received: "Оплата получена",
                 guest_linked: "Гость прикреплён",
+                archived: "Убран в архив",
+                unarchived: "Возвращён из архива",
               } as Record<string, string>
             )[e.type] ??
             e.type,
@@ -804,7 +833,14 @@ async function bookingsPage(ctx: Ctx) {
   return html;
 }
 
-type Product = { id: string; name: string; category?: string; price: number; isAvailable: boolean };
+type Product = {
+  id: string;
+  name: string;
+  category?: string;
+  price: number;
+  isAvailable: boolean;
+  priceLevelPercent?: number | null;
+};
 type Catalog = {
   regular: { items: Product[] };
   exchange: { products: Product[] } | null;
@@ -813,7 +849,15 @@ type Quote = {
   id: string;
   expiresAt: string;
   payableMinor: number;
-  items: { name: string; quantity: number; totalMinor: number }[];
+  companionQuoteId?: string;
+  split?: { regularMinor: number; exchangeMinor: number };
+  items: {
+    name: string;
+    quantity: number;
+    totalMinor: number;
+    itemType?: "EXCHANGE" | "REGULAR_MENU";
+    priceLevelPercent?: number | null;
+  }[];
 };
 
 async function newOrderPage(ctx: Ctx, staff: Staff) {
@@ -859,7 +903,7 @@ async function newOrderPage(ctx: Ctx, staff: Staff) {
   sections.forEach((s, i) => {
     body += `<h2 class="menu-cat" id="cat${i}">${esc(s.title)}</h2>`;
     for (const p of s.items)
-      body += `<div class="menu-row cf"><span class="r"><input class="qty" type="number" min="0" max="99" name="q:${s.prefix}:${esc(p.id)}" value="" placeholder="0"></span><span class="name">${esc(p.name)} <span class="muted">· ${money(Math.round(p.price * 100))}</span></span></div>`;
+      body += `<div class="menu-row cf"><span class="r"><input class="qty" type="number" min="0" max="99" name="q:${s.prefix}:${esc(p.id)}" value="" placeholder="0"></span><span class="name">${esc(p.name)} <span class="muted">· ${money(Math.round(p.price * 100))}${s.prefix === "e" && p.priceLevelPercent != null ? ` · ${levelText(p.priceLevelPercent)}` : ""}</span></span></div>`;
   });
   body += '<button type="submit" class="btn dark block">Рассчитать заказ</button>';
   html += form(ctx, "/lite/new/quote", `<div class="card">${body}</div>`);
@@ -870,14 +914,14 @@ function quoteView(ctx: Ctx, quote: Quote, session: string, key: string, warning
   return `<h1>Проверьте заказ</h1>${warning ? flashBlock({ kind: "err", text: warning }) : ""}<div class="card"><ul class="lines">${quote.items
     .map(
       (i) =>
-        `<li class="cf"><span class="r">${money(i.totalMinor)}</span>${i.quantity} × ${esc(i.name)}</li>`,
+        `<li class="cf"><span class="r">${money(i.totalMinor)}</span>${i.itemType === "REGULAR_MENU" ? "" : '<span class="tagx">БИРЖА</span>'}${i.quantity} × ${esc(i.name)}${i.priceLevelPercent != null ? ` <span class="muted small">${levelText(i.priceLevelPercent)}</span>` : ""}</li>`,
     )
     .join(
       "",
-    )}</ul><div class="total cf">К получению<span class="r">${money(quote.payableMinor)}</span></div><p class="muted small">Расчёт действует до ${time(quote.expiresAt)}. Повторное нажатие безопасно — заказ не задвоится.</p>${form(
+    )}</ul>${quote.split ? `<p class="small">Будет два заказа: основное меню ${money(quote.split.regularMinor)} и биржа ${money(quote.split.exchangeMinor)}.</p>` : ""}<div class="total cf">К получению<span class="r">${money(quote.payableMinor)}</span></div><p class="muted small">Расчёт действует до ${time(quote.expiresAt)}. Повторное нажатие безопасно — заказ не задвоится.</p>${form(
     ctx,
     "/lite/new/submit",
-    `${hidden("quoteId", quote.id)}${hidden("key", key)}${hidden("session", session)}${hidden("payable", quote.payableMinor)}${quote.items.map((i, n) => hidden(`line${n}`, `${i.quantity}|${i.totalMinor}|${i.name}`)).join("")}${hidden("expires", quote.expiresAt)}<button type="submit" class="btn ok block">Оформить заказ</button>`,
+    `${hidden("quoteId", quote.id)}${quote.companionQuoteId ? hidden("companionQuoteId", quote.companionQuoteId) : ""}${hidden("key", key)}${hidden("session", session)}${hidden("payable", quote.payableMinor)}${quote.items.map((i, n) => hidden(`line${n}`, `${i.quantity}|${i.totalMinor}|${i.itemType === "REGULAR_MENU" ? "r" : "e"}|${i.priceLevelPercent ?? ""}|${i.name}`)).join("")}${hidden("expires", quote.expiresAt)}<button type="submit" class="btn ok block">Оформить заказ</button>`,
   )}<a class="btn block" href="/lite/new?session=${esc(session)}">Изменить состав</a></div>`;
 }
 
@@ -890,7 +934,11 @@ async function alerts(ctx: Ctx) {
   if (!ops.ok) return respond(ctx, "", ops.status === 401 ? 401 : 503);
   const body = ops.data.orders
     .filter((o) => o.status === "new")
-    .map((o) => `${o.id}\t${placeName(o)} · №${o.number}`.replace(/[\r\n]+/g, " "))
+    .map(
+      (o) =>
+        `${o.id}\t${placeName(o)} · №${o.number}`.replace(/[\r\n]+/g, " ") +
+        (isExchangeOrder(o) ? "\tx" : ""),
+    )
     .join("\n");
   return respond(ctx, body, 200, { "content-type": "text/plain; charset=utf-8" });
 }
@@ -902,10 +950,13 @@ export function createLiteHandler(dispatch: Dispatch) {
     const url = new URL(request.url);
     if (url.pathname !== "/lite" && !url.pathname.startsWith("/lite/")) return null;
     const path = url.pathname.replace(/\/+$/, "") || "/lite";
-    if (path === "/lite/beep.wav" || path === "/lite/bell.wav")
-      return new Response(path === "/lite/bell.wav" ? bellWav() : beepWav(), {
-        headers: { "content-type": "audio/wav", "cache-control": "public, max-age=86400" },
-      });
+    if (path === "/lite/beep.wav" || path === "/lite/bell.wav" || path === "/lite/chime.wav")
+      return new Response(
+        path === "/lite/bell.wav" ? bellWav() : path === "/lite/chime.wav" ? chimeWav() : beepWav(),
+        {
+          headers: { "content-type": "audio/wav", "cache-control": "public, max-age=86400" },
+        },
+      );
     const cookies = parseCookies(request.headers.get("cookie"));
     const ctx: Ctx = {
       request,
@@ -1108,30 +1159,38 @@ async function handlePost(ctx: Ctx, path: string): Promise<Response> {
     return redirect(ctx, "/lite/login", { kind: "ok", text: "Вы вышли из аккаунта" });
   }
 
-  const order = /^\/lite\/order\/([a-f0-9-]{36})\/(status|paid|cancel)$/i.exec(path);
+  const order = /^\/lite\/order\/([a-f0-9-]{36})\/(status|paid|cancel|archive|unarchive)$/i.exec(
+    path,
+  );
   if (order) {
     const [, id, action] = order;
     const back = safeBack(form.get("back"), `/lite/order/${id}`);
     const result =
-      action === "cancel"
-        ? await api(ctx, "POST", `/dine-in/orders/${id}/cancel`, {
-            reason: (form.get("reason") ?? "").trim(),
-          })
-        : await api(
-            ctx,
-            "PATCH",
-            `/dine-in/orders/${id}/status`,
-            action === "paid"
-              ? { manualPaymentReceived: true }
-              : { status: form.get("status") ?? "" },
-          );
+      action === "archive" || action === "unarchive"
+        ? await api(ctx, "POST", `/dine-in/orders/${id}/${action}`, {})
+        : action === "cancel"
+          ? await api(ctx, "POST", `/dine-in/orders/${id}/cancel`, {
+              reason: (form.get("reason") ?? "").trim(),
+            })
+          : await api(
+              ctx,
+              "PATCH",
+              `/dine-in/orders/${id}/status`,
+              action === "paid"
+                ? { manualPaymentReceived: true }
+                : { status: form.get("status") ?? "" },
+            );
     if (!result.ok) return fail(result, back);
     const text =
-      action === "paid"
-        ? "Оплата отмечена"
-        : action === "cancel"
-          ? "Заказ отменён"
-          : `Статус: ${STATUS_LABEL[form.get("status") ?? ""] ?? "обновлён"}`;
+      action === "archive"
+        ? "Заказ убран в архив"
+        : action === "unarchive"
+          ? "Заказ возвращён из архива"
+          : action === "paid"
+            ? "Оплата отмечена"
+            : action === "cancel"
+              ? "Заказ отменён"
+              : `Статус: ${STATUS_LABEL[form.get("status") ?? ""] ?? "обновлён"}`;
     return redirect(ctx, back, { kind: "ok", text });
   }
 
@@ -1312,27 +1371,43 @@ async function handlePost(ctx: Ctx, path: string): Promise<Response> {
     const session = form.get("session") ?? "";
     const quoteId = form.get("quoteId") ?? "";
     const key = form.get("key") ?? "";
-    const result = await api<{ order: DineOrder }>(ctx, "POST", "/dine-in/staff-orders", {
-      quoteId,
-      idempotencyKey: key,
-    });
+    const companionQuoteId = form.get("companionQuoteId") ?? "";
+    const result = await api<{ order: DineOrder; companionOrder?: DineOrder }>(
+      ctx,
+      "POST",
+      "/dine-in/staff-orders",
+      {
+        quoteId,
+        ...(UUID.test(companionQuoteId) ? { companionQuoteId } : {}),
+        idempotencyKey: key,
+      },
+    );
     if (result.ok)
       return redirect(ctx, `/lite/order/${result.data.order.id}`, {
         kind: "ok",
-        text: `Заказ №${result.data.order.number} оформлен`,
+        text: result.data.companionOrder
+          ? `Заказы №${result.data.order.number} и №${result.data.companionOrder.number} (биржа) оформлены`
+          : `Заказ №${result.data.order.number} оформлен`,
       });
     if (result.status === 401) return fail(result, "/lite/login");
     if (result.status >= 500) {
       // Outcome unknown: offer a safe replay with the same quote and idempotency key.
       const lines: Quote["items"] = [];
       for (let n = 0; form.has(`line${n}`); n++) {
-        const [quantity, total, ...name] = (form.get(`line${n}`) ?? "").split("|");
-        lines.push({ quantity: Number(quantity), totalMinor: Number(total), name: name.join("|") });
+        const [quantity, total, kind, level, ...name] = (form.get(`line${n}`) ?? "").split("|");
+        lines.push({
+          quantity: Number(quantity),
+          totalMinor: Number(total),
+          itemType: kind === "r" ? "REGULAR_MENU" : "EXCHANGE",
+          priceLevelPercent: level === "" ? null : Number(level),
+          name: name.join("|"),
+        });
       }
       const quote: Quote = {
         id: quoteId,
         expiresAt: form.get("expires") ?? new Date().toISOString(),
         payableMinor: Number(form.get("payable") ?? 0),
+        ...(UUID.test(companionQuoteId) ? { companionQuoteId } : {}),
         items: lines,
       };
       const staff = await me(ctx);

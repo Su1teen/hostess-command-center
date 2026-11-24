@@ -21,6 +21,8 @@ import {
   venue,
   orderDetail,
   changeStatus,
+  archiveOrder,
+  checkoutPair,
   verifiedVisitGuest,
   type Owner,
 } from "./service";
@@ -409,7 +411,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
       if (path === "/dine-in/operations" && method === "GET") {
         const rows = (
           await pool.query(
-            `SELECT id FROM dine_in_orders WHERE venue_id=$1 AND status<>'cancelled'
+            `SELECT id FROM dine_in_orders WHERE venue_id=$1 AND status<>'cancelled' AND archived_at IS NULL
            AND (status<>'closed' OR manual_payment_at IS NULL)
            ORDER BY (status='new') DESC,accepted_at,id LIMIT 201`,
             [v.id],
@@ -420,7 +422,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
             `SELECT count(*) FILTER(WHERE status='new')::int AS "newCount",
            count(*) FILTER(WHERE status NOT IN('new','closed','cancelled'))::int AS "workingCount",
            count(*) FILTER(WHERE status<>'cancelled' AND manual_payment_at IS NULL)::int AS "unpaidCount"
-           FROM dine_in_orders WHERE venue_id=$1`,
+           FROM dine_in_orders WHERE venue_id=$1 AND archived_at IS NULL`,
             [v.id],
           )
         ).rows[0];
@@ -466,23 +468,74 @@ export async function handleDiningApi(request: Request): Promise<Response | null
             "OWNER_CHANGED",
             "У визита нет проверенного гостя из прибывшей брони",
           );
+        const owner = { guestId: guest?.id ?? null, hash: hash(actor) };
+        const isRegular = (i: unknown) => (i as { itemType?: string })?.itemType === "REGULAR_MENU";
+        const regularItems = input.items.filter(isRegular),
+          exchangeItems = input.items.filter((i) => !isRegular(i));
+        if (!regularItems.length || !exchangeItems.length)
+          return json(
+            await createQuote(
+              owner,
+              { qrToken: table.token, items: input.items, redeemMinor: input.redeemMinor },
+              { actor, sessionId: input.sessionId, preorderIds: input.preorderIds },
+            ),
+            201,
+          );
+        // Mixed basket: exchange (own price index per line) and regular menu become two orders.
+        const kinds = new Map<string, string>(
+          input.preorderIds.length
+            ? (
+                await pool.query(
+                  "SELECT id,item_type FROM command_center_reservation_preorders WHERE id=ANY($1::uuid[])",
+                  [input.preorderIds],
+                )
+              ).rows.map((r) => [r.id as string, r.item_type as string])
+            : [],
+        );
+        const idsOf = (regular: boolean) =>
+          input.preorderIds.filter((id) => (kinds.get(id) === "REGULAR_MENU") === regular);
+        const main = await createQuote(
+          owner,
+          { qrToken: table.token, items: regularItems, redeemMinor: input.redeemMinor },
+          { actor, sessionId: input.sessionId, preorderIds: idsOf(true) },
+        );
+        const companion = await createQuote(
+          owner,
+          { qrToken: table.token, items: exchangeItems, redeemMinor: 0 },
+          { actor, sessionId: input.sessionId, preorderIds: idsOf(false) },
+        );
+        const sum = (k: "subtotalMinor" | "discountMinor" | "payableMinor" | "cashbackMinor") =>
+          Number(main[k]) + Number(companion[k]);
         return json(
-          await createQuote(
-            { guestId: guest?.id ?? null, hash: hash(actor) },
-            {
-              qrToken: table.token,
-              items: input.items,
-              redeemMinor: input.redeemMinor,
+          {
+            ...main,
+            companionQuoteId: companion.id,
+            expiresAt:
+              Date.parse(main.expiresAt) < Date.parse(companion.expiresAt)
+                ? main.expiresAt
+                : companion.expiresAt,
+            roundId: companion.roundId,
+            items: [...main.items, ...companion.items],
+            split: {
+              regularMinor: Number(main.payableMinor),
+              exchangeMinor: Number(companion.payableMinor),
             },
-            { actor, sessionId: input.sessionId, preorderIds: input.preorderIds },
-          ),
+            subtotalMinor: sum("subtotalMinor"),
+            discountMinor: sum("discountMinor"),
+            payableMinor: sum("payableMinor"),
+            cashbackMinor: sum("cashbackMinor"),
+          },
           201,
         );
       }
       if (path === "/dine-in/staff-orders" && method === "POST") {
         const actor = `staff:${staff.staff_id}`;
         const input = z
-          .object({ quoteId: uuid, idempotencyKey: z.string().min(16).max(128) })
+          .object({
+            quoteId: uuid,
+            companionQuoteId: uuid.optional(),
+            idempotencyKey: z.string().min(16).max(128),
+          })
           .strict()
           .parse(await body(request));
         const quote = (
@@ -492,6 +545,29 @@ export async function handleDiningApi(request: Request): Promise<Response | null
           )
         ).rows[0];
         if (!quote) throw new ApiError(404, "QUOTE_NOT_FOUND", "Расчёт не найден");
+        if (input.companionQuoteId) {
+          const mate = (
+            await pool.query(
+              "SELECT guest_id FROM dine_in_quotes WHERE id=$1 AND venue_id=$2 AND owner_hash=$3 AND staff_actor=$4",
+              [input.companionQuoteId, v.id, hash(actor), actor],
+            )
+          ).rows[0];
+          if (!mate) throw new ApiError(404, "QUOTE_NOT_FOUND", "Расчёт не найден");
+          const pair = await checkoutPair(
+            { guestId: quote.guest_id, hash: hash(actor) },
+            { quoteId: input.quoteId, idempotencyKey: input.idempotencyKey },
+            input.companionQuoteId,
+            actor,
+          );
+          return json(
+            {
+              order: pair.main.order,
+              companionOrder: pair.companion.order,
+              replayed: pair.main.replayed && pair.companion.replayed,
+            },
+            pair.main.replayed ? 200 : 201,
+          );
+        }
         const result = await checkout({ guestId: quote.guest_id, hash: hash(actor) }, input, actor);
         return json(
           { order: result.order, replayed: result.replayed },
@@ -748,14 +824,15 @@ export async function handleDiningApi(request: Request): Promise<Response | null
           .string()
           .max(100)
           .parse(url.searchParams.get("q") ?? "");
+        const archived = url.searchParams.get("archived") === "1";
         const before = url.searchParams.get("before") || null;
         if (before) z.string().datetime().parse(before);
         const rows = (
           await pool.query(
             `SELECT o.id FROM dine_in_orders o JOIN venue_resources r ON r.id=o.table_resource_id LEFT JOIN hostess_guests g ON g.id=o.guest_id
           WHERE o.venue_id=$1 AND ($2::text IS NULL OR o.status=$2) AND ($3='' OR concat_ws(' ',o.number::text,r.code,r.name,g.name,g.phone) ILIKE '%'||$3||'%')
-          AND ($4::timestamptz IS NULL OR o.accepted_at<$4) ORDER BY (o.status='new') DESC,o.accepted_at DESC,o.id DESC LIMIT 100`,
-            [v.id, status, q, before],
+          AND ($4::timestamptz IS NULL OR o.accepted_at<$4) AND (($5::boolean AND o.archived_at IS NOT NULL) OR (NOT $5::boolean AND o.archived_at IS NULL)) ORDER BY (o.status='new') DESC,o.accepted_at DESC,o.id DESC LIMIT 100`,
+            [v.id, status, q, before, archived],
           )
         ).rows;
         const orders = await Promise.all(rows.map((r) => orderDetail(pool, r.id, v.id)));
@@ -767,13 +844,18 @@ export async function handleDiningApi(request: Request): Promise<Response | null
         ).rows;
         return json({ orders, outbox, asOf: new Date().toISOString(), limit: 100 });
       }
-      const orderMatch = /^\/dine-in\/orders\/([a-f0-9-]{36})(?:\/(status|cancel|guest))?$/.exec(
-        path,
-      );
+      const orderMatch =
+        /^\/dine-in\/orders\/([a-f0-9-]{36})(?:\/(status|cancel|guest|archive|unarchive))?$/.exec(
+          path,
+        );
       if (orderMatch) {
         const id = uuid.parse(orderMatch[1]);
         if (!orderMatch[2] && method === "GET")
           return json({ order: await orderDetail(pool, id, v.id) });
+        if ((orderMatch[2] === "archive" || orderMatch[2] === "unarchive") && method === "POST")
+          return json({
+            order: await archiveOrder(id, v.id, staff.staff_id!, orderMatch[2] === "unarchive"),
+          });
         if (orderMatch[2] === "cancel" && method === "POST") {
           const input = z
             .object({ reason: z.string().trim().min(3).max(500) })

@@ -9,6 +9,9 @@ import {
   statusLabels,
   controlClass,
   placeWithZone,
+  isExchangeOrder,
+  levelLabel,
+  canArchive,
 } from "../../lib/dine-in-client";
 import type { FloorSnapshot } from "../../lib/floor-operations";
 import { formatTimeAlmaty } from "../../lib/formatters/time";
@@ -41,6 +44,13 @@ export function ShiftScreen() {
         "floor-folio",
         "floor-operations",
       ])
+        void client.invalidateQueries({ queryKey: [key] });
+    },
+  });
+  const archive = useMutation({
+    mutationFn: (id: string) => staffApi(`/dine-in/orders/${id}/archive`, { method: "POST" }),
+    onSettled: () => {
+      for (const key of ["service-operations", "dining-orders", "floor-folio"])
         void client.invalidateQueries({ queryKey: [key] });
     },
   });
@@ -111,6 +121,11 @@ export function ShiftScreen() {
           {query.error.message} · Данные могут быть устаревшими
         </p>
       )}
+      {archive.error && (
+        <p role="alert" className="text-red-700">
+          {archive.error.message}
+        </p>
+      )}
       {action.error && (
         <p role="alert" className="text-red-700">
           {action.error.message}
@@ -142,20 +157,42 @@ export function ShiftScreen() {
         {orders.map((o) => {
           const age = Math.max(0, Math.floor((Date.now() - Date.parse(o.acceptedAt)) / 60000));
           const step = next[o.status as keyof typeof next];
+          const exchange = isExchangeOrder(o);
           return (
             <article
               key={o.id}
-              className={`rounded-2xl border bg-white p-4 ${o.status === "new" ? "border-amber-300" : "border-slate-200"}`}
+              className={`relative rounded-2xl border p-4 ${exchange ? "border-violet-300 bg-violet-50" : o.status === "new" ? "border-amber-300 bg-white" : "border-slate-200 bg-white"}`}
             >
+              {canWrite && canArchive(o) && (
+                <button
+                  aria-label={`Убрать заказ №${o.number} в архив`}
+                  title="Убрать в архив"
+                  disabled={archive.isPending}
+                  className="absolute right-2 top-2 inline-flex size-11 items-center justify-center rounded-full text-xl text-slate-500 hover:bg-slate-100"
+                  onClick={() => archive.mutate(o.id)}
+                >
+                  ✕
+                </button>
+              )}
               <button onClick={() => openOrder(o.id)} className="block w-full text-left">
-                <h2 className="text-lg font-semibold">{placeWithZone(o)}</h2>
+                {exchange && (
+                  <span className="mb-1 inline-block rounded-full bg-violet-600 px-2 py-0.5 text-xs font-semibold text-white">
+                    Биржа
+                  </span>
+                )}
+                <h2 className="pr-10 text-lg font-semibold">{placeWithZone(o)}</h2>
                 <p
                   className={`mt-1 text-sm ${o.status === "new" && age >= 10 ? "font-semibold text-red-700" : "text-slate-500"}`}
                 >
                   №{o.number} · {statusLabels[o.status]} · {age} мин.
                 </p>
                 <p className="mt-3 text-sm">
-                  {o.items.map((i) => `${i.quantity} × ${i.name}`).join(", ")}
+                  {o.items
+                    .map(
+                      (i) =>
+                        `${i.quantity} × ${i.name}${i.priceLevelPercent != null ? ` (${levelLabel(i.priceLevelPercent)})` : ""}`,
+                    )
+                    .join(", ")}
                 </p>
                 <p className="mt-4 flex justify-between text-sm font-semibold">
                   <span>{o.manualPaymentAt ? "Оплата отмечена" : "К получению"}</span>

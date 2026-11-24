@@ -13,6 +13,9 @@ import {
   type DineOrder,
   placeName,
   placeWithZone,
+  isExchangeOrder,
+  levelLabel,
+  canArchive,
 } from "../../lib/dine-in-client";
 export function OrdersScreen() {
   const role = useStaffRole(),
@@ -21,16 +24,17 @@ export function OrdersScreen() {
   const [status, setStatus] = useState(""),
     [search, setSearch] = useState(""),
     [selected, setSelected] = useState<string | null>(null),
-    [group, setGroup] = useState(true);
+    [group, setGroup] = useState(true),
+    [showArchive, setShowArchive] = useState(false);
   useEffect(() => {
     const orderId = new URLSearchParams(window.location.search).get("order");
     if (orderId && /^[a-f0-9-]{36}$/i.test(orderId)) setSelected(orderId);
   }, []);
   const list = useQuery({
-    queryKey: ["dining-orders", status, search],
+    queryKey: ["dining-orders", status, search, showArchive],
     queryFn: ({ signal }) =>
       staffApi<{ orders: DineOrder[]; outbox: { status: string; count: number }[] }>(
-        `/dine-in/orders?${status ? `status=${status}&` : ""}q=${encodeURIComponent(search)}`,
+        `/dine-in/orders?${showArchive ? "archived=1&" : ""}${status ? `status=${status}&` : ""}q=${encodeURIComponent(search)}`,
         { signal },
       ),
     refetchInterval: 4000,
@@ -97,6 +101,13 @@ export function OrdersScreen() {
         <button className={controlClass} onClick={() => setGroup((v) => !v)}>
           {group ? "По столам" : "Общий список"}
         </button>
+        <button
+          className={controlClass}
+          aria-pressed={showArchive}
+          onClick={() => setShowArchive((v) => !v)}
+        >
+          {showArchive ? "Скрыть архив" : "Архив"}
+        </button>
         <button className={controlClass} onClick={() => void list.refetch()}>
           Обновить
         </button>
@@ -120,52 +131,79 @@ export function OrdersScreen() {
               </h2>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {rows.map((o) => (
-                  <button
-                    key={o.id}
-                    onClick={() => {
-                      setSelected(o.id);
-                      void client.invalidateQueries({ queryKey: ["service-operations"] });
-                      mutation.reset();
-                    }}
-                    className={`w-full rounded-2xl border p-4 text-left ${selected === o.id ? "border-slate-900 bg-slate-100" : "border-slate-200 bg-white"}`}
-                  >
-                    <div className="flex justify-between gap-3">
-                      <strong>
-                        №{o.number} · {group ? placeName(o) : placeWithZone(o)}
-                      </strong>
-                      <span
-                        className={`rounded-full px-2 py-1 text-xs ${o.status === "new" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100"}`}
+                  <div key={o.id} className="relative">
+                    <button
+                      onClick={() => {
+                        setSelected(o.id);
+                        void client.invalidateQueries({ queryKey: ["service-operations"] });
+                        mutation.reset();
+                      }}
+                      className={`w-full rounded-2xl border p-4 text-left ${selected === o.id ? "border-slate-900 bg-slate-100" : isExchangeOrder(o) ? "border-violet-300 bg-violet-50" : "border-slate-200 bg-white"}`}
+                    >
+                      <div className="flex justify-between gap-3">
+                        <strong className="pr-10">
+                          №{o.number} · {group ? placeName(o) : placeWithZone(o)}
+                        </strong>
+                        <span
+                          className={`rounded-full px-2 py-1 text-xs ${o.status === "new" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100"}`}
+                        >
+                          {statusLabels[o.status]}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-500">
+                        {o.guestName ?? "Гость без аккаунта"} · {dateTime(o.acceptedAt)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {o.zoneName} · {o.items.reduce((total, item) => total + item.quantity, 0)}{" "}
+                        поз.
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        {o.items.some((item) => item.itemType === "REGULAR_MENU") && (
+                          <span className="rounded-full bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                            Основное меню
+                          </span>
+                        )}
+                        {o.items.some((item) => item.itemType !== "REGULAR_MENU") && (
+                          <span className="rounded-full bg-violet-50 px-2 py-1 text-xs text-violet-800">
+                            Биржа
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-2 text-sm">
+                        {o.items
+                          .map(
+                            (i) =>
+                              `${i.quantity} × ${i.name}${i.priceLevelPercent != null ? ` (${levelLabel(i.priceLevelPercent)})` : ""}`,
+                          )
+                          .join(", ")}
+                      </p>
+                      <p className="mt-3 flex justify-between font-semibold">
+                        <span>{o.manualPaymentAt ? "Получение отмечено" : "К получению"}</span>
+                        <span>{money(o.payableMinor)}</span>
+                      </p>
+                    </button>
+                    {canWrite && (canArchive(o) || o.archivedAt) && (
+                      <button
+                        aria-label={
+                          o.archivedAt
+                            ? `Вернуть заказ №${o.number} из архива`
+                            : `Убрать заказ №${o.number} в архив`
+                        }
+                        title={o.archivedAt ? "Вернуть из архива" : "Убрать в архив"}
+                        disabled={mutation.isPending}
+                        className="absolute right-2 top-2 inline-flex size-11 items-center justify-center rounded-full text-xl text-slate-500 hover:bg-slate-100"
+                        onClick={() =>
+                          mutation.mutate({
+                            path: `/dine-in/orders/${o.id}/${o.archivedAt ? "unarchive" : "archive"}`,
+                            method: "POST",
+                            data: {},
+                          })
+                        }
                       >
-                        {statusLabels[o.status]}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-sm text-slate-500">
-                      {o.guestName ?? "Гость без аккаунта"} · {dateTime(o.acceptedAt)}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {o.zoneName} · {o.items.reduce((total, item) => total + item.quantity, 0)}{" "}
-                      поз.
-                    </p>
-                    <div className="mt-3 flex gap-2">
-                      {o.items.some((item) => item.itemType === "REGULAR_MENU") && (
-                        <span className="rounded-full bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                          Основное меню
-                        </span>
-                      )}
-                      {o.items.some((item) => item.itemType !== "REGULAR_MENU") && (
-                        <span className="rounded-full bg-violet-50 px-2 py-1 text-xs text-violet-800">
-                          Биржа
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-2 text-sm">
-                      {o.items.map((i) => `${i.quantity} × ${i.name}`).join(", ")}
-                    </p>
-                    <p className="mt-3 flex justify-between font-semibold">
-                      <span>{o.manualPaymentAt ? "Получение отмечено" : "К получению"}</span>
-                      <span>{money(o.payableMinor)}</span>
-                    </p>
-                  </button>
+                        {o.archivedAt ? "↩" : "✕"}
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             </section>

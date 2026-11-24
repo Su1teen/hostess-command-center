@@ -6,6 +6,7 @@ import {
   controlClass,
   placeWithZone,
   type DineOrder,
+  levelLabel,
 } from "../../lib/dine-in-client";
 import { openOrder } from "./ServiceOperations";
 import { FloorFolio } from "../hall/FloorFolio";
@@ -19,12 +20,22 @@ type Product = {
   price: number;
   imageUrl?: string | null;
   isAvailable: boolean;
+  priceLevelPercent?: number | null;
+  originalPrice?: number | null;
 };
 type Quote = {
   id: string;
   expiresAt: string;
   payableMinor: number;
-  items: { name: string; quantity: number; totalMinor: number }[];
+  companionQuoteId?: string;
+  split?: { regularMinor: number; exchangeMinor: number };
+  items: {
+    name: string;
+    quantity: number;
+    totalMinor: number;
+    itemType?: "EXCHANGE" | "REGULAR_MENU";
+    priceLevelPercent?: number | null;
+  }[];
 };
 type Attempt = { quote: Quote; key: string };
 type Preorder = {
@@ -61,6 +72,7 @@ export function StaffOrderComposer({
   const [guests, setGuests] = useState(2),
     [minutes, setMinutes] = useState(120);
   const [created, setCreated] = useState<DineOrder | null>(null),
+    [createdExtra, setCreatedExtra] = useState<DineOrder | null>(null),
     [folio, setFolio] = useState(false);
   const [preorderIds, setPreorderIds] = useState<string[]>([]);
   const seatingAttempt = useRef<Record<string, unknown> | null>(null);
@@ -172,19 +184,24 @@ export function StaffOrderComposer({
     setUncertain(true);
     setError("");
     try {
-      const result = await staffApi<{ order: DineOrder }>("/dine-in/staff-orders", {
-        method: "POST",
-        body: JSON.stringify({
-          quoteId: attempt.current.quote.id,
-          idempotencyKey: attempt.current.key,
-        }),
-      });
+      const result = await staffApi<{ order: DineOrder; companionOrder?: DineOrder }>(
+        "/dine-in/staff-orders",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            quoteId: attempt.current.quote.id,
+            companionQuoteId: attempt.current.quote.companionQuoteId,
+            idempotencyKey: attempt.current.key,
+          }),
+        },
+      );
       sessionStorage.removeItem(storage);
       attempt.current = null;
       setUncertain(false);
       for (const key of ["service-operations", "dining-orders", "floor-folio", "floor-operations"])
         void client.invalidateQueries({ queryKey: [key] });
       setCreated(result.order);
+      setCreatedExtra(result.companionOrder ?? null);
       setCart({});
       setQuote(null);
       setPreorderIds([]);
@@ -330,6 +347,12 @@ export function StaffOrderComposer({
             <p className="text-sm">
               {placeWithZone(created)} · {money(created.payableMinor)}
             </p>
+            {createdExtra && (
+              <p className="rounded-lg bg-violet-100 p-2 text-sm font-medium text-violet-900">
+                Биржа — отдельным заказом №{createdExtra.number} ·{" "}
+                {money(createdExtra.payableMinor)}
+              </p>
+            )}
             <button className={`${controlClass} w-full`} onClick={() => openOrder(created.id)}>
               Принять в работу / отметить оплату
             </button>
@@ -340,6 +363,7 @@ export function StaffOrderComposer({
               className={`${controlClass} w-full`}
               onClick={() => {
                 setCreated(null);
+                setCreatedExtra(null);
                 setFolio(false);
               }}
             >
@@ -546,6 +570,9 @@ export function StaffOrderComposer({
                       <p className="text-sm font-medium">{p.name}</p>
                       <p className="mt-1 text-xs text-slate-500">
                         {p.category} · {money(p.price * 100)}
+                        {section === "exchange" && levelLabel(p.priceLevelPercent)
+                          ? ` · ${levelLabel(p.priceLevelPercent)}`
+                          : ""}
                         {!p.isAvailable ? " · Недоступно" : ""}
                       </p>
                     </div>
@@ -599,10 +626,23 @@ export function StaffOrderComposer({
             {quote && (
               <div className="rounded-xl bg-slate-50 p-3 text-sm">
                 {quote.items.map((i, n) => (
-                  <p key={n}>
-                    {i.quantity} × {i.name} · {money(i.totalMinor)}
+                  <p
+                    key={n}
+                    className={i.itemType === "REGULAR_MENU" ? "" : "font-medium text-violet-800"}
+                  >
+                    {i.itemType === "REGULAR_MENU" ? "" : "Биржа · "}
+                    {i.quantity} × {i.name}
+                    {levelLabel(i.priceLevelPercent) ? ` · ${levelLabel(i.priceLevelPercent)}` : ""}
+                    {" · "}
+                    {money(i.totalMinor)}
                   </p>
                 ))}
+                {quote.split && (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Будет два заказа: основное меню {money(quote.split.regularMinor)} и биржа{" "}
+                    {money(quote.split.exchangeMinor)}
+                  </p>
+                )}
                 <strong className="mt-3 block text-lg">
                   К оплате: {money(quote.payableMinor)}
                 </strong>

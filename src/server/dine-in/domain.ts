@@ -117,6 +117,7 @@ export const snapshotSchema = z.object({
       previousPrice: z.number().nullable().optional(),
       minPrice: z.number().nullable().optional(),
       changePercent: z.number().nullable().optional(),
+      priceLevelPercent: z.number().nullable().optional(),
     }),
   ),
 });
@@ -130,6 +131,9 @@ export type Line = {
   roundId: string | null;
   itemType?: "EXCHANGE" | "REGULAR_MENU";
   menuVersion?: number;
+  /** Exchange price index at the moment of sale (−30…+70, step 10). */
+  priceLevelPercent?: number | null;
+  originalPriceMinor?: number | null;
 };
 export function priceLines(
   snapshot: Snapshot,
@@ -150,6 +154,9 @@ export function priceLines(
       unitPriceMinor,
       totalMinor: unitPriceMinor * item.quantity,
       roundId: snapshot.currentRound.id,
+      priceLevelPercent: p.priceLevelPercent ?? null,
+      originalPriceMinor:
+        p.originalPrice != null && p.originalPrice > 0 ? toMinor(p.originalPrice) : null,
     };
   });
   return { lines, expiresAt: new Date(expiry).toISOString() };

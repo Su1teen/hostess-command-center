@@ -8,7 +8,13 @@ import {
   type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { staffApi, type DineOrder, controlClass, placeName } from "../../lib/dine-in-client";
+import {
+  staffApi,
+  type DineOrder,
+  controlClass,
+  placeName,
+  isExchangeOrder,
+} from "../../lib/dine-in-client";
 import { StaffOrderComposer } from "./StaffOrderComposer";
 import { OrderDrawer } from "./OrderDrawer";
 
@@ -97,14 +103,21 @@ export function ServiceOperations({ children }: { children: ReactNode }) {
     if (fresh.length) {
       setNotice(fresh[0]);
       if (sound && audio.current?.state === "running") {
-        const osc = audio.current.createOscillator(),
-          gain = audio.current.createGain();
-        osc.connect(gain);
-        gain.connect(audio.current.destination);
-        gain.gain.value = 0.1;
-        osc.frequency.value = 880;
-        osc.start();
-        osc.stop(audio.current.currentTime + 0.15);
+        // Regular order: one short beep. Exchange order: three rising notes, clearly different.
+        const ctx = audio.current,
+          notes = isExchangeOrder(fresh[0]) ? [660, 880, 1320] : [880];
+        notes.forEach((freq, n) => {
+          const osc = ctx.createOscillator(),
+            gain = ctx.createGain(),
+            at = ctx.currentTime + n * 0.18;
+          osc.type = notes.length > 1 ? "triangle" : "sine";
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          gain.gain.value = 0.1;
+          osc.frequency.value = freq;
+          osc.start(at);
+          osc.stop(at + 0.15);
+        });
       }
     }
     seen.current = new Set([...(seen.current ?? []), ...query.data.orders.map((o) => o.id)]);
@@ -148,7 +161,7 @@ export function ServiceOperations({ children }: { children: ReactNode }) {
       {notice && (
         <div
           role="status"
-          className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-lg items-center justify-between gap-3 rounded-2xl bg-slate-900 p-4 text-sm text-white shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-200"
+          className={`fixed inset-x-4 top-4 z-50 mx-auto flex max-w-lg items-center justify-between gap-3 rounded-2xl p-4 ${isExchangeOrder(notice) ? "bg-violet-700" : "bg-slate-900"} text-sm text-white shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-200`}
         >
           <button
             className="text-left"
@@ -157,7 +170,8 @@ export function ServiceOperations({ children }: { children: ReactNode }) {
               setNotice(null);
             }}
           >
-            Новый заказ №{notice.number} · {placeName(notice)}
+            {isExchangeOrder(notice) ? "Заказ с БИРЖИ" : "Новый заказ"} №{notice.number} ·{" "}
+            {placeName(notice)}
             <span className="block text-xs">
               {notice.zoneName} ·{" "}
               {new Date(notice.acceptedAt).toLocaleTimeString("ru-RU", {

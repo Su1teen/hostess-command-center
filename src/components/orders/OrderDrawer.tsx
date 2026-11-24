@@ -10,6 +10,7 @@ import {
   controlClass,
   type DineOrder,
   placeName,
+  levelLabel,
 } from "../../lib/dine-in-client";
 const nextStatus = {
   new: "accepted",
@@ -122,6 +123,8 @@ export function OrderDrawer({ orderId, onClose }: { orderId: string | null; onCl
                   <p className="mt-1 break-all text-xs text-slate-400">
                     {money(i.unitPriceMinor)} за ед. ·{" "}
                     {i.itemType === "REGULAR_MENU" ? "Основное меню" : "Биржа напитков"}
+                    {i.priceLevelPercent != null && ` · ${levelLabel(i.priceLevelPercent)}`}
+                    {i.originalPriceMinor && ` · в меню ${money(i.originalPriceMinor)}`}
                   </p>
                 </div>
               ))}
@@ -242,6 +245,8 @@ export function OrderDrawer({ orderId, onClose }: { orderId: string | null; onCl
                         created: "Заказ создан",
                         manual_payment_received: "Оплата получена",
                         guest_linked: "Гость прикреплён",
+                        archived: "Убран в архив",
+                        unarchived: "Возвращён из архива",
                       }[e.type] ??
                       e.type}{" "}
                     · {e.actor}

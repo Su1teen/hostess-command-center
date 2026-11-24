@@ -86,6 +86,18 @@ describe("quote and service state", () => {
     expect(p.lines[0].totalMinor).toBe(477000);
     expect(Date.parse(p.expiresAt)).toBe(now + 120000);
   });
+  test("exchange line keeps the board price index and menu price", () => {
+    const snap = {
+      ...sample,
+      products: sample.products.map((x) => ({ ...x, priceLevelPercent: -20, originalPrice: 1990 })),
+    };
+    const l = priceLines(snap, [{ productId: id, quantity: 1 }], now).lines[0];
+    expect(l.priceLevelPercent).toBe(-20);
+    expect(l.originalPriceMinor).toBe(199000);
+    expect(
+      priceLines(sample, [{ productId: id, quantity: 1 }], now).lines[0].priceLevelPercent,
+    ).toBeNull();
+  });
   test("round boundary limits expiry", () =>
     expect(
       Date.parse(

@@ -53,6 +53,10 @@ p{margin:4px 0}
 .card.new{border:2px solid #f59e0b;background:#fffbeb}
 .card.warn{border-color:#fcd34d;background:#fffbeb}
 .card.late{border:2px solid #dc2626}
+.card.exch{border:2px solid #7c3aed;background:#f5f3ff}
+.tagx{display:inline-block;padding:2px 9px;-webkit-border-radius:10px;border-radius:10px;font-size:12px;font-weight:bold;background:#6d28d9;color:#ffffff;margin:0 6px 4px 0}
+.xform{float:right;margin:-4px -4px 0 8px}
+.xbtn{min-width:46px;height:46px;padding:0 8px;font-size:24px;line-height:44px;text-align:center;background:#ffffff;color:#6b7280;border:1px solid #d1d5db;-webkit-border-radius:23px;border-radius:23px;cursor:pointer;font-family:Arial,sans-serif}
 .card a.title{text-decoration:none;display:block}
 .row{margin:0 -6px}
 .col{float:left;width:50%;padding:0 6px}
@@ -117,6 +121,8 @@ textarea.field{min-height:80px}
 .foot a{color:#6b7280}
 .alarm{position:fixed;top:0;left:0;right:0;z-index:1000;padding:12px 14px;background:#dc2626;color:#ffffff;font-size:22px;line-height:1.25;border-bottom:4px solid #7f1d1d}
 .alarm.flash{background:#facc15;color:#111827;border-bottom-color:#a16207}
+.alarm.exch{background:#6d28d9;border-bottom-color:#3b0764}
+.alarm.exch.flash{background:#c4b5fd;color:#2e1065;border-bottom-color:#7c3aed}
 .alarm a{color:inherit;text-decoration:none;display:block;padding-right:130px}
 .alarm .btn{float:right;margin:0 0 0 10px;font-size:20px;padding:12px 18px;background:#ffffff;color:#111827;border-color:#ffffff}
 .alarm .tap{display:block;font-size:15px;margin-top:4px;text-decoration:underline}
@@ -172,6 +178,7 @@ export const LITE_JS = `(function () {
   /* ---------- sound ---------- */
   var bell = doc.getElementById("bell");
   var beepEl = doc.getElementById("beep");
+  var chime = doc.getElementById("chime");
   var button = doc.getElementById("sound");
   var soundOn = getItem("hostess-lite-sound") !== "0";
   var unlocked = false;
@@ -202,7 +209,7 @@ export const LITE_JS = `(function () {
   function unlock() {
     if (unlocked) return;
     unlocked = true;
-    var players = [bell, beepEl];
+    var players = [bell, beepEl, chime];
     for (var i = 0; i < players.length; i++) {
       var el = players[i];
       if (!el || !el.play) continue;
@@ -245,6 +252,7 @@ export const LITE_JS = `(function () {
   var repeatTimer = null;
   var blinkTimer = null;
   var flash = false;
+  var exch = false;
   var alertFailures = 0;
   function acknowledged() { return "," + (getItem("hostess-lite-acked") || "") + ","; }
   function ringSeries() {
@@ -252,7 +260,7 @@ export const LITE_JS = `(function () {
     ringing = true;
     function strike() {
       if (!active) { ringing = false; return; }
-      play(bell);
+      play(exch && chime ? chime : bell);
       count++;
       if (count < 3) later(strike, 1800);
       else later(function () { ringing = false; }, 1800);
@@ -262,12 +270,12 @@ export const LITE_JS = `(function () {
   }
   function blink() {
     flash = !flash;
-    alarm.className = flash ? "alarm flash" : "alarm";
-    doc.title = flash ? "*** \\u041d\\u041e\\u0412\\u042b\\u0419 \\u0417\\u0410\\u041a\\u0410\\u0417 ***" : baseTitle;
+    alarm.className = (exch ? "alarm exch" : "alarm") + (flash ? " flash" : "");
+    doc.title = flash ? (exch ? "*** \\u0411\\u0418\\u0420\\u0416\\u0410 ***" : "*** \\u041d\\u041e\\u0412\\u042b\\u0419 \\u0417\\u0410\\u041a\\u0410\\u0417 ***") : baseTitle;
   }
   function start() {
     active = true;
-    alarm.className = "alarm";
+    alarm.className = exch ? "alarm exch" : "alarm";
     blinkTimer = window.setInterval(blink, 600);
     ringSeries();
     repeatTimer = window.setInterval(function () { if (active && !ringing) ringSeries(); }, 15000);
@@ -291,13 +299,18 @@ export const LITE_JS = `(function () {
     if (!fresh.length) { if (active) stop(); return; }
     var labels = [];
     var added = false;
+    exch = false;
     var next = ",";
     for (var k = 0; k < fresh.length; k++) {
       labels.push(fresh[k].label);
+      if (fresh[k].kind === "x") exch = true;
       next += fresh[k].id + ",";
       if (shown.indexOf("," + fresh[k].id + ",") < 0) added = true;
     }
     shown = next;
+    var title = doc.getElementById("alarm-title");
+    if (title) title.innerHTML = exch ? "\\u0417\\u0410\\u041a\\u0410\\u0417 \\u0421 \\u0411\\u0418\\u0420\\u0416\\u0418" : "\\u041d\\u041e\\u0412\\u042b\\u0419 \\u0417\\u0410\\u041a\\u0410\\u0417";
+    alarm.className = exch ? "alarm exch" : "alarm";
     alarmText.innerHTML = "";
     alarmText.appendChild(doc.createTextNode(labels.join(" \\u00b7 ")));
     if (!active) start();
@@ -307,8 +320,8 @@ export const LITE_JS = `(function () {
     var out = [];
     var lines = String(text || "").split("\\n");
     for (var i = 0; i < lines.length; i++) {
-      var tab = lines[i].indexOf("\\t");
-      if (tab > 0) out.push({ id: lines[i].substring(0, tab), label: lines[i].substring(tab + 1) });
+      var cols = lines[i].split("\\t");
+      if (cols.length >= 2 && cols[0]) out.push({ id: cols[0], label: cols[1], kind: cols[2] || "" });
     }
     return out;
   }
@@ -501,4 +514,45 @@ export function bellWav(): Uint8Array<ArrayBuffer> {
     samples[i] = (Math.tanh((drive * samples[i]) / peak) / norm) * tail;
   }
   return (cachedBell = wav(rate, samples));
+}
+
+let cachedChime: Uint8Array<ArrayBuffer> | null = null;
+/**
+ * Exchange-order chime: three rising marimba-like notes (G5–B5–E6), deliberately unlike the
+ * double «дзынь-дзынь» bell used for ordinary orders, so staff tell them apart without looking.
+ */
+export function chimeWav(): Uint8Array<ArrayBuffer> {
+  if (cachedChime) return cachedChime;
+  const rate = 22050,
+    samples = new Float64Array(Math.round(rate * 1.5)),
+    notes = [
+      [0, 784],
+      [0.28, 988],
+      [0.56, 1319],
+    ];
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const t = i / rate;
+    let value = 0;
+    for (const [at, freq] of notes) {
+      const dt = t - at;
+      if (dt < 0) continue;
+      const attack = Math.min(1, dt / 0.003);
+      value +=
+        attack *
+        Math.exp(-dt * 3.2) *
+        (Math.sin(2 * Math.PI * freq * dt) +
+          0.5 * Math.sin(2 * Math.PI * freq * 2 * dt) +
+          0.25 * Math.sin(2 * Math.PI * freq * 3 * dt));
+    }
+    samples[i] = value;
+    peak = Math.max(peak, Math.abs(value));
+  }
+  const drive = 2.2,
+    norm = Math.tanh(drive);
+  for (let i = 0; i < samples.length; i++) {
+    const tail = Math.min(1, (samples.length - i) / (rate * 0.05));
+    samples[i] = (Math.tanh((drive * samples[i]) / peak) / norm) * tail;
+  }
+  return (cachedChime = wav(rate, samples));
 }

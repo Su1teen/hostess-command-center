@@ -65,6 +65,7 @@ export type DineOrder = {
   status: keyof typeof statusLabels;
   manualPaymentAt: string | null;
   acceptedAt: string;
+  archivedAt?: string | null;
   subtotalMinor: string;
   discountMinor: string;
   payableMinor: string;
@@ -78,6 +79,8 @@ export type DineOrder = {
     roundId: string | null;
     itemType?: "EXCHANGE" | "REGULAR_MENU";
     menuVersion?: number | null;
+    priceLevelPercent?: number | null;
+    originalPriceMinor?: string | null;
   }[];
   events: {
     id: string;
@@ -130,3 +133,19 @@ export type QrRegistry = {
 };
 export const controlClass =
   "min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm disabled:opacity-40";
+/** Order made of exchange (биржа) lines — shown in violet, rings with its own sound. */
+export const isExchangeOrder = (o: { items: { itemType?: string }[] }) =>
+  o.items.length > 0 && o.items.some((i) => i.itemType === "EXCHANGE");
+/** Exchange price index, same wording as on the board: «Уровень −10%». */
+export const levelLabel = (level: number | null | undefined) =>
+  level == null ? null : `Уровень ${level > 0 ? "+" : level < 0 ? "−" : ""}${Math.abs(level)}%`;
+/** Order can go to the archive once it is done (mirrors the server rule). */
+export const canArchive = (o: {
+  status: string;
+  manualPaymentAt: string | null;
+  archivedAt?: string | null;
+}) =>
+  !o.archivedAt &&
+  (o.status === "closed" ||
+    o.status === "cancelled" ||
+    (o.status === "delivered" && !!o.manualPaymentAt));
