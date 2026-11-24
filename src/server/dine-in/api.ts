@@ -23,6 +23,8 @@ import {
   changeStatus,
   archiveOrder,
   checkoutPair,
+  createGuestQuote,
+  checkoutGuest,
   verifiedVisitGuest,
   type Owner,
 } from "./service";
@@ -287,7 +289,7 @@ export async function handleDiningApi(request: Request): Promise<Response | null
       if (path === "/dine-in/quotes" && method === "POST") {
         const context = await getOwner(request, true);
         return json(
-          guestQuote(await createQuote(context.owner, await body(request))),
+          guestQuote(await createGuestQuote(context.owner, await body(request))),
           201,
           context.setCookie,
         );
@@ -313,9 +315,25 @@ export async function handleDiningApi(request: Request): Promise<Response | null
       }
       if (path === "/dine-in/orders" && method === "POST") {
         const context = await getOwner(request);
-        const result = await checkout(context.owner, await body(request));
-        const publicOrder = guestOrder(result.order, result.receiptToken);
-        return json({ ...result, order: publicOrder }, result.replayed ? 200 : 201);
+        const result = await checkoutGuest(context.owner, await body(request));
+        let publicOrder = guestOrder(result.order, result.receiptToken);
+        const mate = "companion" in result ? result.companion : null;
+        if (mate) {
+          // One confirmation for the guest: both lines and the combined total.
+          const extra = guestOrder(mate.order, mate.receiptToken);
+          publicOrder = {
+            ...publicOrder,
+            lines: [...publicOrder.lines, ...extra.lines],
+            subtotal: publicOrder.subtotal + extra.subtotal,
+            discount: publicOrder.discount + extra.discount,
+            payable: publicOrder.payable + extra.payable,
+            cashback: publicOrder.cashback + extra.cashback,
+          };
+        }
+        const { companion: _companion, ...rest } = result as typeof result & {
+          companion?: unknown;
+        };
+        return json({ ...rest, order: publicOrder }, result.replayed ? 200 : 201);
       }
       const orderMatch = /^\/dine-in\/orders\/([a-f0-9-]{36})$/.exec(path);
       if (orderMatch && method === "GET") {

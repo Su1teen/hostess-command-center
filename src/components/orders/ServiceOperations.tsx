@@ -101,11 +101,13 @@ export function ServiceOperations({ children }: { children: ReactNode }) {
       (o) => o.status === "new" && seen.current && !seen.current.has(o.id),
     );
     if (fresh.length) {
-      setNotice(fresh[0]);
+      // One banner and one sound per batch: an exchange order wins if the batch has one.
+      const lead = fresh.find(isExchangeOrder) ?? fresh[0];
+      setNotice(lead);
       if (sound && audio.current?.state === "running") {
         // Regular order: one short beep. Exchange order: three rising notes, clearly different.
         const ctx = audio.current,
-          notes = isExchangeOrder(fresh[0]) ? [660, 880, 1320] : [880];
+          notes = isExchangeOrder(lead) ? [660, 880, 1320] : [880];
         notes.forEach((freq, n) => {
           const osc = ctx.createOscillator(),
             gain = ctx.createGain(),

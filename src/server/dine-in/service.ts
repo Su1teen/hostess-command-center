@@ -270,11 +270,67 @@ export async function checkout(owner: Owner, raw: unknown, staffActor?: string) 
 }
 /** Staff basket mixing exchange and regular items becomes two separate orders in ONE transaction:
  * if either quote went stale nothing is created, so a re-quote never duplicates the other order. */
+/** Guest quote: a basket mixing exchange and regular items becomes two linked quotes
+ * (exchange keeps its own round price index); the id returned is the regular one. */
+export async function createGuestQuote(owner: Owner, raw: unknown) {
+  const parsed = quoteInput.safeParse(raw);
+  if (!parsed.success) return createQuote(owner, raw);
+  const input = parsed.data;
+  const regular = input.items.filter((i) => i.itemType === "REGULAR_MENU");
+  const exchange = input.items.filter((i) => (i.itemType ?? "EXCHANGE") === "EXCHANGE");
+  if (!regular.length || !exchange.length) return createQuote(owner, raw);
+  const main = await createQuote(owner, {
+    qrToken: input.qrToken,
+    items: regular,
+    redeemMinor: input.redeemMinor,
+  });
+  const companion = await createQuote(owner, {
+    qrToken: input.qrToken,
+    items: exchange,
+    redeemMinor: 0,
+  });
+  await pool.query("UPDATE dine_in_quotes SET companion_quote_id=$2 WHERE id=$1", [
+    main.id,
+    companion.id,
+  ]);
+  const sum = (k: "subtotalMinor" | "discountMinor" | "payableMinor" | "cashbackMinor") =>
+    Number(main[k]) + Number(companion[k]);
+  return {
+    ...main,
+    expiresAt:
+      Date.parse(main.expiresAt) < Date.parse(companion.expiresAt)
+        ? main.expiresAt
+        : companion.expiresAt,
+    roundId: companion.roundId,
+    items: [...main.items, ...companion.items],
+    split: {
+      regularMinor: Number(main.payableMinor),
+      exchangeMinor: Number(companion.payableMinor),
+    },
+    subtotalMinor: sum("subtotalMinor"),
+    discountMinor: sum("discountMinor"),
+    payableMinor: sum("payableMinor"),
+    cashbackMinor: sum("cashbackMinor"),
+  };
+}
+/** Guest checkout: a linked quote pair yields two orders; the first one carries the receipt. */
+export async function checkoutGuest(owner: Owner, raw: unknown) {
+  const input = orderInput.parse(raw);
+  const quote = (
+    await pool.query(
+      "SELECT companion_quote_id FROM dine_in_quotes WHERE id=$1 AND owner_hash=$2",
+      [input.quoteId, owner.hash],
+    )
+  ).rows[0];
+  if (!quote?.companion_quote_id) return checkout(owner, input);
+  const pair = await checkoutPair(owner, input, quote.companion_quote_id);
+  return { ...pair.main, companion: pair.companion };
+}
 export async function checkoutPair(
   owner: Owner,
   raw: unknown,
   companionQuoteId: string,
-  staffActor: string,
+  staffActor?: string,
 ) {
   const input = orderInput.parse(raw);
   return transaction(async (client) => {
