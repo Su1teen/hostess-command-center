@@ -47,11 +47,16 @@ const STATUS_LABEL: Record<string, string> = {
   closed: "Закрыт",
   cancelled: "Отменён",
 };
+/** Waiter flow: accept, then finish. Kitchen/serve steps are secondary buttons inside the order. */
 const NEXT_STEP: Record<string, [string, string]> = {
-  new: ["accepted", "Принять заказ"],
-  accepted: ["preparing", "На приготовление"],
+  new: ["accepted", "Принять"],
+  accepted: ["closed", "Завершить"],
+  preparing: ["closed", "Завершить"],
+  delivered: ["closed", "Завершить"],
+};
+const DETAIL_STEP: Record<string, [string, string]> = {
+  accepted: ["preparing", "Передать на кухню"],
   preparing: ["delivered", "Отметить подачу"],
-  delivered: ["closed", "Завершить заказ"],
 };
 const FLOOR_LABEL: Record<string, string> = {
   free: "Свободен",
@@ -499,6 +504,13 @@ async function orderPage(ctx: Ctx, staff: Staff, id: string) {
         ctx,
         `/lite/order/${o.id}/status`,
         `${hidden("status", step[0])}${hidden("back", back)}<button type="submit" class="btn dark block">${step[1]}</button>`,
+      );
+    const detail = DETAIL_STEP[o.status];
+    if (detail)
+      html += form(
+        ctx,
+        `/lite/order/${o.id}/status`,
+        `${hidden("status", detail[0])}${hidden("back", back)}<button type="submit" class="btn block">${detail[1]}</button>`,
       );
     if (!o.manualPaymentAt)
       html += form(

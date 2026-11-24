@@ -135,9 +135,15 @@ describe("lite: old-browser compatibility gates", () => {
       min = Math.min(min, v);
       max = Math.max(max, v);
     }
-    // Full scale: the peak reaches the 8-bit rails.
-    expect(min).toBeLessThanOrEqual(2);
-    expect(max).toBeGreaterThanOrEqual(253);
+    // Still loud, but 20% quieter than full scale (peak ≈ 80% of the 8-bit range).
+    expect(min).toBeLessThanOrEqual(35);
+    expect(min).toBeGreaterThanOrEqual(15);
+    expect(max).toBeGreaterThanOrEqual(220);
+    expect(max).toBeLessThanOrEqual(240);
+  });
+  test("the alarm rings once per new order instead of repeating", () => {
+    expect(LITE_JS).not.toContain("15000");
+    expect(LITE_JS).toContain("count < 1");
   });
   test("money avoids the ₸ glyph and groups thousands", () => {
     expect(money("245050")).toBe("2 450,50 тг");
@@ -186,7 +192,7 @@ describe("lite: pages", () => {
     expect(html).toContain("Стол 07");
     expect(html).toContain("Плов &lt;b&gt;");
     expect(html).not.toContain("<script>alert(1)</script>");
-    expect(html).toContain("Принять заказ");
+    expect(html).toContain("Принять");
     expect(html).toContain('data-new="11111111-1111-4111-8111-111111111111"');
     expect(html).toContain('<noscript><meta http-equiv="refresh" content="20"></noscript>');
     const partial = (await handle(get("/lite/shift?partial=1")))!;
@@ -204,7 +210,7 @@ describe("lite: pages", () => {
       "GET /floor": () => [200, { zones: [] }],
     });
     const html = await (await handle(get("/lite/shift")))!.text();
-    expect(html).not.toContain("Принять заказ");
+    expect(html).not.toContain("Принять<");
     expect(html).not.toContain("+ Заказ");
   });
 });
@@ -673,7 +679,6 @@ describe("lite: manager bulk clean-up", () => {
     });
     await handle(post("/lite/orders/bulk", { action: "close", id: A }));
     expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([
-      { status: "delivered" },
       { status: "closed" },
       { manualPaymentReceived: true },
     ]);

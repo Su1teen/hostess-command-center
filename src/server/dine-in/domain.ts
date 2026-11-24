@@ -54,7 +54,7 @@ export function assertTransition(from: OrderStatus, to: OrderStatus) {
   if (from === to) return;
   if (
     to === "cancelled" ||
-    statusNames.indexOf(to) !== statusNames.indexOf(from) + 1 ||
+    statusNames.indexOf(to) < statusNames.indexOf(from) ||
     from === "closed" ||
     from === "cancelled"
   )

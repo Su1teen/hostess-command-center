@@ -113,7 +113,7 @@ export function ServiceOperations({ children }: { children: ReactNode }) {
           osc.type = notes.length > 1 ? "triangle" : "sine";
           osc.connect(gain);
           gain.connect(ctx.destination);
-          gain.gain.value = 0.1;
+          gain.gain.value = 0.08;
           osc.frequency.value = freq;
           osc.start(at);
           osc.stop(at + 0.15);

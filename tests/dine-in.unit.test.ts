@@ -149,10 +149,15 @@ describe("quote and service state", () => {
     ).toBe(false));
   test("valid state transition", () =>
     expect(() => assertTransition("new", "accepted")).not.toThrow());
-  test("skip, cancel shortcut and reopen rejected", () => {
-    expect(() => assertTransition("new", "closed")).toThrow();
-    expect(() => assertTransition("new", "cancelled")).toThrow();
+  test("waiter shortcut: accept then finish skips kitchen steps", () => {
+    expect(() => assertTransition("accepted", "closed")).not.toThrow();
+    expect(() => assertTransition("new", "closed")).not.toThrow();
+  });
+  test("backwards moves and reopening are rejected", () => {
+    expect(() => assertTransition("closed", "accepted")).toThrow();
+    expect(() => assertTransition("delivered", "accepted")).toThrow();
     expect(() => assertTransition("cancelled", "closed")).toThrow();
+    expect(() => assertTransition("closed", "cancelled")).toThrow();
   });
 });
 describe("real QR exports", () => {

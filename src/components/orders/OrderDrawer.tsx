@@ -12,6 +12,12 @@ import {
   placeName,
   levelLabel,
 } from "../../lib/dine-in-client";
+const stepLabels = {
+  accepted: "Принять",
+  preparing: "Передать на кухню",
+  delivered: "Подано",
+  closed: "Завершить",
+} as const;
 const nextStatus = {
   new: "accepted",
   accepted: "preparing",
@@ -166,7 +172,16 @@ export function OrderDrawer({ orderId, onClose }: { orderId: string | null; onCl
                         })
                       }
                     >
-                      {statusLabels[nextStatus[order.status as keyof typeof nextStatus]]}
+                      {stepLabels[nextStatus[order.status as keyof typeof nextStatus]]}
+                    </button>
+                  )}
+                  {["accepted", "preparing"].includes(order.status) && (
+                    <button
+                      disabled={mutation.isPending}
+                      className={controlClass}
+                      onClick={() => change("status", { status: "closed" })}
+                    >
+                      Завершить
                     </button>
                   )}
                   {!order.manualPaymentAt && (

@@ -262,11 +262,11 @@ export const LITE_JS = `(function () {
       if (!active) { ringing = false; return; }
       play(exch && chime ? chime : bell);
       count++;
-      if (count < 3) later(strike, 1800);
+      if (count < 1) later(strike, 1800);
       else later(function () { ringing = false; }, 1800);
     }
     strike();
-    try { if (window.navigator.vibrate) window.navigator.vibrate([400, 200, 400, 200, 400]); } catch (e) {}
+    try { if (window.navigator.vibrate) window.navigator.vibrate([400]); } catch (e) {}
   }
   function blink() {
     flash = !flash;
@@ -278,7 +278,6 @@ export const LITE_JS = `(function () {
     alarm.className = exch ? "alarm exch" : "alarm";
     blinkTimer = window.setInterval(blink, 600);
     ringSeries();
-    repeatTimer = window.setInterval(function () { if (active && !ringing) ringSeries(); }, 15000);
   }
   function stop() {
     active = false;
@@ -511,7 +510,7 @@ export function bellWav(): Uint8Array<ArrayBuffer> {
     norm = Math.tanh(drive);
   for (let i = 0; i < samples.length; i++) {
     const tail = Math.min(1, (samples.length - i) / (rate * 0.05));
-    samples[i] = (Math.tanh((drive * samples[i]) / peak) / norm) * tail;
+    samples[i] = (Math.tanh((drive * samples[i]) / peak) / norm) * tail * 0.8;
   }
   return (cachedBell = wav(rate, samples));
 }
@@ -552,7 +551,7 @@ export function chimeWav(): Uint8Array<ArrayBuffer> {
     norm = Math.tanh(drive);
   for (let i = 0; i < samples.length; i++) {
     const tail = Math.min(1, (samples.length - i) / (rate * 0.05));
-    samples[i] = (Math.tanh((drive * samples[i]) / peak) / norm) * tail;
+    samples[i] = (Math.tanh((drive * samples[i]) / peak) / norm) * tail * 0.8;
   }
   return (cachedChime = wav(rate, samples));
 }

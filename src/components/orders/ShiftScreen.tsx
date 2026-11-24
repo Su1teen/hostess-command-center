@@ -16,11 +16,12 @@ import {
 import type { FloorSnapshot } from "../../lib/floor-operations";
 import { formatTimeAlmaty } from "../../lib/formatters/time";
 
+/** Waiter flow: accept, then finish. Kitchen/serve steps stay inside the order card. */
 const next = {
-  new: ["accepted", "Принять заказ"],
-  accepted: ["preparing", "Передать на приготовление"],
-  preparing: ["delivered", "Отметить подачу"],
-  delivered: ["closed", "Завершить заказ"],
+  new: ["accepted", "Принять"],
+  accepted: ["closed", "Завершить"],
+  preparing: ["closed", "Завершить"],
+  delivered: ["closed", "Завершить"],
 } as const;
 export function ShiftScreen() {
   const query = useOperations(),
